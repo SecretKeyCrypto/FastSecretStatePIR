@@ -72,18 +72,15 @@ func permuteMatrix(permutator utils.Permutator, encryptor *utils.Encryptor, rmc 
 	}
 
 	q := len(rmc)
-	// bit_q := int(math.Ceil(math.Log2(float64(q))))
 	cur_row := 0
 	cur_col := 0
 	data := rmc[cur_row][cur_col]
 
 	for {
-		val = cur_row*q + cur_col
+		val = utils.RowColToSingleIndexGo(q, cur_row, cur_col)
 		ciphertextInt, _ = permutator.EncryptMap(val)
-		new_row = ciphertextInt / q
-		new_col = ciphertextInt % q
+		new_row, new_col = utils.SingleIndexToRowColGo(q, ciphertextInt)
 
-		// if hasPermuted(rmc[new_row][new_col], q) {
 		if visited[new_row][new_col] {
 			cur_row = cur_row + (cur_col+1)/q
 			cur_col = (cur_col + 1) % q
@@ -117,9 +114,8 @@ func verify(permutator *utils.Permutator, encryptor *utils.Encryptor, enc [][]in
 	for i := range decoded {
 		decoded[i] = make([]int, q)
 	}
-	// Loop through rows
+
 	for i := 0; i < len(enc); i++ {
-		// Loop through columns in each row
 		for j := 0; j < len(enc[0]); j++ {
 			decoded[i][j] = encryptor.Decrypt(i, j, enc[i][j])
 		}
@@ -127,9 +123,10 @@ func verify(permutator *utils.Permutator, encryptor *utils.Encryptor, enc [][]in
 
 	for i := 0; i < q*q; i++ {
 		new_position, _ := permutator.EncryptMap(i)
-		row := new_position / q
-		col := new_position % q
-		if ori[i/q][i%q] != decoded[row][col] {
+		row, col := utils.SingleIndexToRowColGo(q, new_position)
+		ori_row, ori_col := utils.SingleIndexToRowColGo(q, i)
+
+		if ori[ori_row][ori_col] != decoded[row][col] {
 			panicMessage := fmt.Sprintf("MISS MATCH: Index %d, From value %d at (%d, %d) To %d at (%d, %d)", i, ori[row][col], i/11, i%11, decoded[row][col], row, col)
 			fmt.Println(panicMessage)
 		}
@@ -167,12 +164,6 @@ func getPermutatorAndEncrpytor() (*utils.Permutator, *utils.Encryptor, utils.Con
 	key, err = base64.StdEncoding.DecodeString(conf.EncyrptorKey)
 	if err != nil {
 		fmt.Println("Error decoding key:", err)
-		panic(err)
-	}
-
-	tweak, err = base64.StdEncoding.DecodeString(conf.EncyrptorKey)
-	if err != nil {
-		fmt.Println("Error decoding tweak:", err)
 		panic(err)
 	}
 

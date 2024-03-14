@@ -67,25 +67,19 @@ func NewPermutatorWithParameters(maxNum, minNum, maxLen, minLen, radix int, key,
 	}, nil
 }
 
-func (p *Permutator) WithinNumRange(myNum string) (bool, error) {
-	num, err := p.BaseRStringToInt(myNum)
-	if err != nil {
-		return false, err
-	}
-
-	return num >= p.minNum && num < p.maxNum, nil
+func (p *Permutator) WithinNumRange(num int) bool {
+	return num >= p.minNum && num < p.maxNum
 }
 
 func (p *Permutator) EncryptMap(plaintextInt int) (int, error) {
-	plaintext, _ := p.IntToBaseRString(int64(plaintextInt + p.minNum))
+	plaintext := p.IntToBaseRString(uint64(plaintextInt + p.minNum))
 	for {
 		ciphertext, err := p.Cipher.Encrypt(plaintext)
 		if err != nil {
 			return -1, err
 		}
-		passedMaxNumTest, _ := p.WithinNumRange(ciphertext)
-		if passedMaxNumTest {
-			ciphertextInt, err := p.BaseRStringToInt(ciphertext)
+		ciphertextInt, err := p.BaseRStringToInt(ciphertext)
+		if p.WithinNumRange(ciphertextInt) {
 			return ciphertextInt - p.minNum, err
 		}
 		plaintext = ciphertext
@@ -93,31 +87,33 @@ func (p *Permutator) EncryptMap(plaintextInt int) (int, error) {
 }
 
 func (p *Permutator) DecryptMap(ciphertextInt int) (int, error) {
-	ciphertext, _ := p.IntToBaseRString(int64(ciphertextInt + p.minNum))
+	ciphertext := p.IntToBaseRString(uint64(ciphertextInt + p.minNum))
 	for {
 		plaintext, err := p.Cipher.Decrypt(ciphertext)
 		if err != nil {
 			return -1, err
 		}
-		passedMaxNumTest, _ := p.WithinNumRange(plaintext)
-		if passedMaxNumTest {
-			plaintextInt, err := p.BaseRStringToInt(plaintext)
+		plaintextInt, err := p.BaseRStringToInt(plaintext)
+		if p.WithinNumRange(plaintextInt) {
 			return plaintextInt - p.minNum, err
 		}
 		ciphertext = plaintext
 	}
 }
 
-func (p *Permutator) IntToBaseRString(number int64) (string, error) {
-	var baseRString string
-	if p.radix <= 36 {
-		baseRString = strconv.FormatInt(number, p.radix)
+func (p *Permutator) IntToBaseRString(u uint64) string {
+	if p.radix == 10 || (isPowerOfTwo(p.radix) && p.radix <= 36) {
+		baseRString := strconv.FormatUint(u, p.radix)
+		numZerosNeeded := p.maxLen - len(baseRString)
+		if numZerosNeeded > 0 {
+			padding := strings.Repeat("0", numZerosNeeded)
+			return padding + baseRString
+		}
+		return baseRString
 	} else {
-		var a [64 + 1]byte // +1 for sign of 64bit value in base 2
+		a := make([]byte, p.maxLen)
 		i := len(a)
-
 		b := uint64(p.radix)
-		u := uint64(number)
 		for u >= b {
 			i--
 			q := u / b
@@ -127,10 +123,13 @@ func (p *Permutator) IntToBaseRString(number int64) (string, error) {
 		// u < base
 		i--
 		a[i] = charsetBase[uint(u)]
-		baseRString = string(a[i:])
+		for i > 0 {
+			i--
+			a[i] = '0'
+		}
+
+		return string(a)
 	}
-	paddedString := fmt.Sprintf("%0*s", p.maxLen, baseRString)
-	return paddedString, nil
 }
 
 func charsetForRadix(radix int) (charset string) {
@@ -175,6 +174,10 @@ func findBestRadixAndLength(maxNum int) (bestRadix int, bestLength int, minDelta
 func minLenByRadix(radix int) (minLen int) {
 	minLen = int(math.Ceil(math.Log(feistelMin) / math.Log(float64(radix))))
 	return
+}
+
+func isPowerOfTwo(x int) bool {
+	return x&(x-1) == 0
 }
 
 func (p *Permutator) ReturnParameters() (int, int, int, int, int) {

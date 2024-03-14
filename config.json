@@ -1,13 +1,13 @@
 {
-  "q": 1031,
+  "q": 2053,
   "k": 4,
   "encryptorKey": "zF8c77HQpAbnQ+0GUJOd5w==",
   "permutatorConfig": {
     "key": "4uGm7oEtj9DrIkW72yC05w==",
     "tweak": "4aKJRtH2sDo=",
-    "maxNum": 1062994,
-    "minNum": 33,
-    "radix": 33,
+    "maxNum": 4214855,
+    "minNum": 46,
+    "radix": 46,
     "minLen": 2,
     "maxLen": 4
   }

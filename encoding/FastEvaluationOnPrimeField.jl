@@ -62,9 +62,6 @@ end
 #                 Ref: Modern Computer Algebra Chapter 10.1
 ################################################################################
 function buildModTree(q::Integer)
-    # Build the lowest layer with single zero point of 1:p
-    # tree = map(genZeroPointPoly, collect(1:p))
-    # Fp, x = FiniteField(p, 1, "x")
     Fq = FiniteField(q, 1, "x")[1]
     R = PolynomialRing(Fq, "x")[1]
     tree = map(i -> R([Fq(-i),Fq(1)]), collect(1:q))
