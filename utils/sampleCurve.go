@@ -54,8 +54,6 @@ func GenerateRandomPolynomialCoeffs(degree, q, t, a int) []int {
 }
 
 func GenerateCurvePoints(degree, q, i int) []int {
-	// x := i / q
-	// y := i % q
 	x, y := SingleIndexToRowColGo(q, i)
 	t := rand.Intn(q)
 	uni_x := GenerateRandomPolynomialCoeffs(degree, q, t, x)
@@ -66,7 +64,6 @@ func GenerateCurvePoints(degree, q, i int) []int {
 		if i != t {
 			point_x := EvaluatePolynomial(uni_x, i, q)
 			point_y := EvaluatePolynomial(uni_y, i, q)
-			// points = append(points, point_x*q+point_y)
 			points = append(points, RowColToSingleIndexGo(q, point_x, point_y))
 		}
 	}

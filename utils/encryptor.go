@@ -49,21 +49,14 @@ func (e *Encryptor) EncryptPosition(ii, jj int) int {
 	}
 
 	ciphertext := make([]byte, len(plaintext))
-	for start := 0; start < len(plaintext); start += aes.BlockSize {
-		end := start + aes.BlockSize
-		e.cipher.Encrypt(ciphertext[start:end], plaintext[start:end])
-	}
+	e.cipher.Encrypt(ciphertext, plaintext)
 
 	// bigCipher := new(big.Int).SetBytes(ciphertext)
 	// re := new(big.Int).Mod(bigCipher, big.NewInt(int64(e.q)))
 	// return (int(re.Int64())) % e.q
 
 	shortCipher := ciphertext[:8]
-
-	// Convert the first 8 bytes to an int64
 	cipherInt := int(binary.BigEndian.Uint64(shortCipher))
-
-	// Perform the modulus operation
 	return cipherInt % e.q
 }
 
