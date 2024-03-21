@@ -110,7 +110,7 @@ function genZeroPointPoly(i, p)
 end
 
 function toInt(i::fqPolyRepFieldElem)
-    return parse(Int16, string(i))
+    return parse(Int64, string(i))
 end
 
 function toInt(i::fqPolyRepPolyRingElem)
