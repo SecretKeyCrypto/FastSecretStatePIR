@@ -14,7 +14,7 @@ function RMEncoding(message, q, d)
     Fq = FiniteField(q, 1, "x")[1]
     R, x = PolynomialRing(Fq, "x")
 
-    matt = zeros(Int16, q, q)
+    matt = zeros(Int64, q, q)
     index = 1
 
     for i = 1:d+1
@@ -86,42 +86,8 @@ end
 function RME(q::Int; k = 4) 
     d = (q-2)÷k
     message = rand(0:q-1, Int64((d+1)*(d+2)/2))
-    rmcc = RMEncoding(message, q, d)
-    systematic_test(message, rmcc, d)
-    simpleTest(rmcc, q)
-    writedlm(stdout, rmcc, ',')
+    rmc = RMEncoding(message, q, d)
+    systematic_test(message, rmc, d)
+    simpleTest(rmc, q)
+    return rmc
 end
-
-
-q = parse(Int, ARGS[1])
-
-if length(ARGS) >= 2
-    # Parse the second argument to an integer
-    k = parse(Int, ARGS[2])
-    RME(q, k = k)
-else
-    RME(q)
-end
-# d = q÷4
-# message = rand(0:q-1, Int64((d+1)*(d+2)/2))
-# rmcc = RMEncoding(message, q, d)
-# systematic_test(message, rmcc, d)
-# simpleTest(rmcc, q)
-# writedlm(stdout, rmcc, ',')
-
-# # q = 2^10 15s
-# # q = 2^11 96s
-# # q = 2^12 629.597368
-# # 629.597368 seconds (5.64 G allocations: 254.522 GiB, 21.04% gc time, 0.01% compilation time)
-
-# # q = 2^13 simply for coeff.
-# # 4666.636293 seconds (33.46 G allocations: 1.293 TiB, 39.18% gc time)
-# # q = 2^12.5
-# # 1781.417077 seconds (14.88 G allocations: 656.562 GiB, 25.73% gc time), 2153702696
-# # q = 2^13 
-# # 7391.344118 seconds (47.50 G allocations: 1.887 TiB, 20.31% gc time) 8209×8209 Matrix{Int16} 128M
-# # df_read = CSV.read("matrix.csv", DataFrame)
-# # matrix_read = Matrix{Int}(df_read)
-# # file_systematic_test(message, matrix_read, d)
-
-

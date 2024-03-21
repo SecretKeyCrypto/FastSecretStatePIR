@@ -3,27 +3,43 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/csv"
 	"fmt"
-	"io"
 	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 
 	"rme/utils"
 )
 
-func RMEncoding(q int) (matrix [][]int) {
-	juliaPath := "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
+func findJuliaPath() (string, error) {
+	cmd := exec.Command("which", "julia")
 
-	scriptPath := "./RMEncoding.jl"
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	path := out.String()
+	path = path[:len(path)-1]
+
+	return path, nil
+}
+
+func RMEncoding(q, k int) (matrix [][]int) {
+	juliaPath, err1 := findJuliaPath()
+	if err1 != nil {
+		juliaPath = "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
+	}
+
+	scriptPath := "./GoRMEInterface.jl"
 
 	// Argument to pass to your Julia script
 	argument := fmt.Sprint(q)
-	arg_k := "4"
+	arg_k := fmt.Sprint(k)
 
-	// Create the command to execute the Julia script
+	// Execute the Julia script
 	cmd := exec.Command(juliaPath, scriptPath, argument, arg_k)
 
 	var out bytes.Buffer
@@ -33,28 +49,11 @@ func RMEncoding(q int) (matrix [][]int) {
 		fmt.Println("Error executing Julia:", err)
 	}
 
-	r := csv.NewReader(strings.NewReader(out.String()))
-
-	for {
-		record, err := r.Read()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			fmt.Println("Error reading CSV:", err)
-			return
-		}
-
-		var row []int
-		for _, value := range record {
-			intValue, err := strconv.Atoi(value)
-			if err != nil {
-				fmt.Println("Error converting string to int:", err)
-				return
-			}
-			row = append(row, intValue)
-		}
-		matrix = append(matrix, row)
+	filename_ori := "../output/matrix_original.csv"
+	matrix, err = utils.ReadMatrixFromFile(filename_ori)
+	if err != nil {
+		fmt.Println("Error Reading Matrix From Julia Output:", err)
+		panic(err)
 	}
 	return
 }
@@ -177,17 +176,14 @@ func main() {
 	permutator, encryptor, config := getPermutatorAndEncrpytor()
 
 	starttime := time.Now()
-	rmc := RMEncoding(config.Q)
-	filename_ori := "../output/matrix_original.csv"
-	if err := utils.WriteMatrixToFile(rmc, filename_ori); err != nil {
-		panic(err)
-	}
+	rmc := RMEncoding(config.Q, config.K)
+	fmt.Println(time.Since(starttime), "For Encoding")
+	starttime = time.Now()
 
 	permuteMatrix(*permutator, encryptor, rmc)
+	fmt.Println(time.Since(starttime), "For Permutation")
+	starttime = time.Now()
 
-	duration := time.Since(starttime)
-
-	fmt.Println("Encoding Duration: ", duration)
 	filename := "../output/matrix.csv"
 	if err := utils.WriteMatrixToFile(rmc, filename); err != nil {
 		panic(err)
