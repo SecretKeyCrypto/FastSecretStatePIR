@@ -4,45 +4,46 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"math"
 )
 
 type Encryptor struct {
-	cipher cipher.Block
-	q      int
+	cipher  cipher.Block
+	q       uint64
+	maxModq uint64
 }
 
-func NewEncryptor(key []byte, q int) (*Encryptor, error) {
+func NewEncryptor(key []byte, q int) (Encryptor, error) {
+	var encryptor Encryptor
 
 	blockcipher, err := aes.NewCipher(key)
 
 	if err != nil {
-		return nil, err
+		return encryptor, err
 	}
 
-	return &Encryptor{
-		cipher: blockcipher,
-		q:      q,
-	}, nil
+	encryptor.cipher = blockcipher
+	encryptor.q = uint64(q)
+	encryptor.maxModq = (math.MaxUint64%encryptor.q + 1) % encryptor.q
+
+	return encryptor, nil
 }
 
-func generatePlaintextFromCoordinate(i, j int16) []byte {
+func generatePlaintextFromCoordinate(row, col int) []byte {
 	plaintext := make([]byte, aes.BlockSize)
-	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(i))
-	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(j))
+	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(row))
+	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(col))
 	return plaintext
 }
 
 // encryptBlock encrypts a single block of plaintext using AES in ECB mode.
-func (e *Encryptor) Encrypt(ii, jj, data int) int {
+func (e Encryptor) Encrypt(row, col, data int) int {
 
-	return (e.EncryptPosition(ii, jj) + data) % e.q
+	return (e.EncryptPosition(row, col) + (data)) % int(e.q)
 }
 
-func (e *Encryptor) EncryptPosition(ii, jj int) int {
-	i := int16(ii)
-	j := int16(jj)
-
-	plaintext := generatePlaintextFromCoordinate(i, j)
+func (e Encryptor) EncryptPosition(row, col int) int {
+	plaintext := generatePlaintextFromCoordinate(row, col)
 
 	if len(plaintext)%aes.BlockSize != 0 {
 		panic("Plaintext length for aes encryption not valid!")
@@ -51,15 +52,18 @@ func (e *Encryptor) EncryptPosition(ii, jj int) int {
 	ciphertext := make([]byte, len(plaintext))
 	e.cipher.Encrypt(ciphertext, plaintext)
 
-	// bigCipher := new(big.Int).SetBytes(ciphertext)
-	// re := new(big.Int).Mod(bigCipher, big.NewInt(int64(e.q)))
-	// return (int(re.Int64())) % e.q
+	A1 := binary.BigEndian.Uint64(ciphertext[:8])
+	A2 := binary.BigEndian.Uint64(ciphertext[8:])
 
-	shortCipher := ciphertext[:8]
-	cipherInt := int(binary.BigEndian.Uint64(shortCipher))
-	return cipherInt % e.q
+	// For demonstration, let's perform a modulus operation on A1 and A2 with q
+	q := uint64(e.q) // Example modulus
+
+	// Calculate (A1 * 2^64 + A2) % q
+	result := ((A1%q)*e.maxModq + A2%q) % q
+
+	return int(result)
 }
 
-func (e *Encryptor) Decrypt(ii, jj, data int) int {
-	return (-e.EncryptPosition(ii, jj) + data + e.q) % e.q
+func (e Encryptor) Decrypt(row, col, data int) int {
+	return (-e.EncryptPosition(row, col) + (data) + int(e.q)) % int(e.q)
 }

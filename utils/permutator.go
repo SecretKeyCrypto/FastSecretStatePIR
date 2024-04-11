@@ -1,153 +1,162 @@
 package utils
 
 import (
-	"fmt"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
 	"math"
-	"strconv"
-	"strings"
-
-	"github.com/capitalone/fpe/ff1"
 )
 
 const (
-	feistelMin  = 100
-	charsetBase = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	feistelMin    = 100
+	blockSize     = aes.BlockSize
+	numRounds     = 10
+	halfBlockSize = blockSize / 2
+)
+
+var (
+	// For all AES-CBC calls, IV is always 0
+	ivZero = make([]byte, blockSize)
 )
 
 type Permutator struct {
-	Cipher ff1.Cipher
+	tweak  []byte
 	maxNum int
-	minNum int
 	radix  int
-	minLen int
 	maxLen int
+	// Re-usable CBC encryptor with exported SetIV function
+	cbcEncryptor cipher.BlockMode
+	P            []byte
+	b            int
+	d            int
+	lenQ         int
+	lenPQ        int
+	numPad       int
+	numModU      uint64
+	numModV      uint64
 }
 
-func NewPermutator(numRange int, key, tweak []byte) (*Permutator, error) {
-	radix, maxLen, _ := findBestRadixAndLength(numRange)
+// Need this for the SetIV function which CBCEncryptor has, but cipher.BlockMode interface doesn't.
+type cbcMode interface {
+	cipher.BlockMode
+	SetIV([]byte)
+}
+
+func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
+	radix, maxLen, _ := findBestRadixAndLength(maxNum)
+	// 	return NewPermutatorWithParameters(numRange, maxLen, radix, key, tweak)
+	// }
+
+	// func NewPermutatorWithParameters(maxNum, maxLen, radix int, key, tweak []byte) (Permutator, error) {
+	var newPermutator Permutator
+
 	if len(tweak) > maxLen {
 		tweak = tweak[:maxLen]
 	}
-	minLen := minLenByRadix(radix)
-	minNum := int(math.Pow(float64(radix), float64(minLen-1)))
-	FF1, err := ff1.NewCipher(radix, maxLen, key, tweak)
 
-	if err != nil {
-		return nil, err
+	aesBlock, _ := aes.NewCipher(key)
+
+	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
+
+	u := maxLen / 2
+	v := maxLen - u
+	t := len(tweak)
+
+	// Byte lengths
+	b := int(math.Ceil(math.Ceil(float64(v)*math.Log2(float64(radix))) / 8))
+	d := int(4*math.Ceil(float64(b)/4) + 4)
+
+	numPad := (-t - b - 1) % 16
+	if numPad < 0 {
+		numPad += 16
 	}
 
-	return &Permutator{
-		Cipher: FF1,
-		maxNum: numRange + minNum,
-		minNum: minNum,
-		radix:  radix,
-		minLen: minLen,
-		maxLen: maxLen,
-	}, nil
+	// Calculate P, doesn't change in each loop iteration
+	// P's length is always 16, so it can stay on the stack
+	P := make([]byte, blockSize)
+
+	P[0] = 0x01
+	P[1] = 0x02
+	P[2] = 0x01
+	P[3] = 0x00
+	binary.BigEndian.PutUint16(P[4:6], uint16(radix))
+	P[6] = 0x0a
+	P[7] = byte(maxLen / 2) // overflow automatically does the modulus
+	binary.BigEndian.PutUint32(P[8:12], uint32(maxLen))
+	binary.BigEndian.PutUint32(P[12:blockSize], uint32(len(tweak)))
+
+	lenQ := t + b + 1 + numPad
+
+	newPermutator.maxNum = maxNum
+	newPermutator.radix = radix
+	newPermutator.maxLen = maxLen
+	newPermutator.cbcEncryptor = cbcEncryptor
+	newPermutator.tweak = tweak
+	newPermutator.b = b
+	newPermutator.d = d
+	newPermutator.lenQ = lenQ
+	newPermutator.lenPQ = blockSize + lenQ
+	newPermutator.numPad = numPad
+	newPermutator.P = P
+	newPermutator.numModU = uint64(math.Pow(float64(radix), float64(u)))
+	newPermutator.numModV = uint64(math.Pow(float64(radix), float64(v)))
+
+	return newPermutator, nil
 }
 
-func NewPermutatorWithParameters(maxNum, minNum, maxLen, minLen, radix int, key, tweak []byte) (*Permutator, error) {
-	if len(tweak) > maxLen {
-		tweak = tweak[:maxLen]
-	}
-
-	FF1, err := ff1.NewCipher(radix, maxLen, key, tweak)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &Permutator{
-		Cipher: FF1,
-		maxNum: maxNum,
-		minNum: minNum,
-		radix:  radix,
-		minLen: minLen,
-		maxLen: maxLen,
-	}, nil
-}
-
-func (p *Permutator) WithinNumRange(num int) bool {
-	return num >= p.minNum && num < p.maxNum
-}
-
-func (p *Permutator) EncryptMap(plaintextInt int) (int, error) {
-	plaintext := p.IntToBaseRString(uint64(plaintextInt + p.minNum))
+func (p Permutator) Permute(X uint64) (uint64, error) {
+	var ret uint64
 	for {
-		ciphertext, err := p.Cipher.Encrypt(plaintext)
-		if err != nil {
-			return -1, err
+		ret = p.Encrypt(X)
+		if ret < uint64(p.maxNum) {
+			return ret, nil
 		}
-		ciphertextInt, err := p.BaseRStringToInt(ciphertext)
-		if p.WithinNumRange(ciphertextInt) {
-			return ciphertextInt - p.minNum, err
-		}
-		plaintext = ciphertext
+		X = ret
 	}
 }
 
-func (p *Permutator) DecryptMap(ciphertextInt int) (int, error) {
-	ciphertext := p.IntToBaseRString(uint64(ciphertextInt + p.minNum))
-	for {
-		plaintext, err := p.Cipher.Decrypt(ciphertext)
-		if err != nil {
-			return -1, err
+func (p Permutator) Encrypt(X uint64) uint64 {
+	t := len(p.tweak)
+
+	PQ := make([]byte, p.lenPQ)
+	R := make([]byte, p.lenPQ)
+
+	Q := PQ[blockSize:]
+	copy(Q[:t], p.tweak)
+	copy(PQ[:blockSize], p.P)
+
+	var numA, numB, numC, numY uint64
+
+	numUint64Bytes := make([]byte, 8)
+
+	Y := R[p.lenPQ-blockSize:]
+
+	numA = X / p.numModV
+	numB = X % p.numModV
+
+	// Main Feistel Round, 10 times
+	for i := 0; i < numRounds; i++ {
+		Q[t+p.numPad] = byte(i)
+
+		binary.BigEndian.PutUint64(numUint64Bytes, numB)
+
+		copy(Q[p.lenQ-p.b:], numUint64Bytes[8-p.b:])
+
+		p.prf(PQ, R)
+
+		numY = binary.BigEndian.Uint64(Y[:p.d])
+		numC = numA + numY
+
+		if i%2 == 0 {
+			numC %= p.numModU
+		} else {
+			numC %= p.numModV
 		}
-		plaintextInt, err := p.BaseRStringToInt(plaintext)
-		if p.WithinNumRange(plaintextInt) {
-			return plaintextInt - p.minNum, err
-		}
-		ciphertext = plaintext
+
+		numA = numB
+		numB = numC
 	}
-}
-
-func (p *Permutator) IntToBaseRString(u uint64) string {
-	if p.radix == 10 || (isPowerOfTwo(p.radix) && p.radix <= 36) {
-		baseRString := strconv.FormatUint(u, p.radix)
-		numZerosNeeded := p.maxLen - len(baseRString)
-		if numZerosNeeded > 0 {
-			padding := strings.Repeat("0", numZerosNeeded)
-			return padding + baseRString
-		}
-		return baseRString
-	} else {
-		a := make([]byte, p.maxLen)
-		i := len(a)
-		b := uint64(p.radix)
-		for u >= b {
-			i--
-			q := u / b
-			a[i] = charsetBase[uint(u-q*b)]
-			u = q
-		}
-		// u < base
-		i--
-		a[i] = charsetBase[uint(u)]
-		for i > 0 {
-			i--
-			a[i] = '0'
-		}
-
-		return string(a)
-	}
-}
-
-func charsetForRadix(radix int) (charset string) {
-	return charsetBase[:radix]
-}
-
-func (p *Permutator) BaseRStringToInt(s string) (int, error) {
-	charset := charsetForRadix(p.radix)
-	var num int
-	for _, char := range s {
-		val := strings.IndexRune(charset, char)
-		if val == -1 {
-			return 0, fmt.Errorf("invalid character: %v", string(char))
-		}
-		num = num*int(p.radix) + int(val)
-	}
-
-	return num, nil
+	return numA*p.numModV + numB
 }
 
 func findBestRadixAndLength(maxNum int) (bestRadix int, bestLength int, minDelta int) {
@@ -155,11 +164,11 @@ func findBestRadixAndLength(maxNum int) (bestRadix int, bestLength int, minDelta
 
 	for radix := 2; radix <= 62; radix++ {
 		minLen := minLenByRadix(radix)
-		logValue := math.Log(float64(maxNum)+math.Pow(float64(radix), float64(minLen))) / math.Log(float64(radix))
-		length := int(math.Ceil(logValue))
+		logValue := math.Log(float64(maxNum)) / math.Log(float64(radix))
+		length := int(math.Max(float64(minLen), (math.Ceil(logValue))))
 
 		if length < math.MaxUint32 {
-			delta := int(math.Pow(float64(radix), float64(length))) - maxNum - int(math.Pow(float64(radix), float64(minLen)))
+			delta := int(math.Pow(float64(radix), float64(length))) - maxNum
 			if delta < minDelta {
 				minDelta = delta
 				bestRadix = radix
@@ -176,10 +185,70 @@ func minLenByRadix(radix int) (minLen int) {
 	return
 }
 
-func isPowerOfTwo(x int) bool {
-	return x&(x-1) == 0
+func (p Permutator) ReturnParameters() (int, int, int) {
+	return p.maxNum, p.maxLen, p.radix
 }
 
-func (p *Permutator) ReturnParameters() (int, int, int, int, int) {
-	return p.maxNum, p.minNum, p.maxLen, p.minLen, p.radix
+func (p Permutator) Revert(X uint64) (uint64, error) {
+	var ret uint64
+	for {
+		ret = p.Decrypt(X)
+		if ret < uint64(p.maxNum) {
+			return ret, nil
+		}
+		X = ret
+	}
+}
+
+func (p Permutator) Decrypt(X uint64) uint64 {
+	PQ := make([]byte, p.lenPQ)
+	buf_R := make([]byte, p.lenPQ)
+	Q := PQ[blockSize:]
+	t := len(p.tweak)
+
+	copy(Q[:t], p.tweak)
+	copy(PQ[:blockSize], p.P)
+
+	var numA, numB, numC, numY uint64
+
+	numUint64Bytes := make([]byte, 8)
+
+	Y := buf_R[p.lenPQ-blockSize:]
+
+	numA = X / p.numModV
+	numB = X % p.numModV
+
+	// Main Feistel Round, 10 times
+	for i := numRounds - 1; i >= 0; i-- {
+		Q[t+p.numPad] = byte(i)
+		binary.BigEndian.PutUint64(numUint64Bytes, numA)
+
+		copy(Q[p.lenQ-p.b:], numUint64Bytes[8-p.b:])
+
+		p.prf(PQ, buf_R)
+
+		numY = binary.BigEndian.Uint64(Y[:p.d])
+
+		numC = numY - numB
+
+		if i%2 == 0 {
+			numC %= p.numModU
+			numC = (p.numModU - numC) % p.numModU
+		} else {
+			numC %= p.numModV
+			numC = (p.numModV - numC) % p.numModV
+		}
+
+		numB = numA
+		numA = numC
+	}
+
+	return numA*p.numModV + numB
+}
+
+// PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
+func (p Permutator) prf(input []byte, output []byte) {
+	p.cbcEncryptor.CryptBlocks(output, input)
+	// Reset IV to 0
+	p.cbcEncryptor.(cbcMode).SetIV(ivZero)
 }
