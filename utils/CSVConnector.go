@@ -2,6 +2,7 @@ package utils
 
 import (
 	"encoding/csv"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -25,6 +26,32 @@ func WriteMatrixToFile(matrix [][]int, filename string) error {
 		if err := writer.Write(stringRow); err != nil {
 			return err // Return early on write error
 		}
+	}
+
+	return nil
+}
+
+func WriteSliceToCSV(filename string, numbers []int) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("could not create file: %v", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	stringNumbers := make([]string, len(numbers))
+	for i, num := range numbers {
+		stringNumbers[i] = strconv.Itoa(num)
+	}
+
+	if err := writer.Write(stringNumbers); err != nil {
+		return fmt.Errorf("could not write to CSV: %v", err)
+	}
+
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("error writing CSV: %v", err)
 	}
 
 	return nil
