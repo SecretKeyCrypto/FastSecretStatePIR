@@ -18,7 +18,7 @@ function RMEncoding(message, q, d)
     index = 1
 
     for i = 1:d+1
-        matt[i, 1:d+2-i] = message[index: index + d+1-i]
+        matt[1:d+2-i, i] = message[index: index + d+1-i]
         index += d+2-i
     end
 
@@ -45,7 +45,7 @@ function RMEncoding(message, q, d)
     end
 
     modtree = buildModTree(q)
-    
+
     for col in 1:q
         matt[:, col] = [toInt(i) for i in uniVWithTree(R(matt[:, col]), q, modtree)]
     end
@@ -55,12 +55,12 @@ end
 
 function systematic_test(message, rmc, d)
     index = 0
-    row = 1
+    col = 1
 
     for i = d+1:-1:1
-        @assert message[index+1:index+i] == rmc[row, 1:i]
+        @assert message[index+1:index+i] == rmc[1:i, col]
         index += i
-        row += 1
+        col += 1
     end
 end
 
@@ -83,9 +83,8 @@ function simpleTest(rmc, q)
     @assert sum([rmc[i,i] for i in 1:q]) % q == 0
 end
 
-function RME(q::Int; k = 4) 
-    d = (q-2)÷k
-    message = rand(0:q-1, Int64((d+1)*(d+2)/2))
+function RME(message::Vector{Int}, d::Int, q::Int)
+    @assert (d+1) * (d+2) == 2*length(message)
     rmc = RMEncoding(message, q, d)
     systematic_test(message, rmc, d)
     simpleTest(rmc, q)
