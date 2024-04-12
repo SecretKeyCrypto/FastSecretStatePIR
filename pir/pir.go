@@ -13,7 +13,7 @@ import (
 type PIR interface {
 	Gen()
 	Encode(string, string) [][]int
-	Query(uint64, bool) (int, []int)
+	Query(uint64) (int, []int)
 	Decode(int, []int) int
 }
 
@@ -103,15 +103,17 @@ func (p *pir) Encode(input, output string) [][]int {
 	return rmc
 }
 
-func (p *pir) Query(i int, serverOn bool) (int, []int) {
+func (p *pir) Query(i int) (int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
 	query, points := p.prepareQuerySequence(points)
-	var response int
-	if serverOn {
-		response = p.queryServer(query)
-	} else {
-		response = p.queryLocal(query)
-	}
+	response := p.queryServer(query)
+	return response, points
+}
+
+func (p *pir) QueryLocal(i int, filename string) (int, []int) {
+	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
+	query, points := p.prepareQuerySequence(points)
+	response := p.queryLocalDB(query, filename)
 	return response, points
 }
 
@@ -154,11 +156,9 @@ func RMEncoding(input, output string, q, k int) (matrix [][]int) {
 
 	scriptPath := "../encoding/GoRMEInterface.jl"
 
-	// Argument to pass to your Julia script
 	arg_q := fmt.Sprint(q)
 	arg_k := fmt.Sprint(k)
 
-	// Execute the Julia script
 	cmd := exec.Command(juliaPath, scriptPath, input, output, arg_q, arg_k)
 
 	var out bytes.Buffer
@@ -265,8 +265,8 @@ func (pir *pir) queryServer(list []int) int {
 	return respData.Sum
 }
 
-func (p *pir) queryLocal(list []int) int {
-	rmc, err := utils.ReadMatrixFromFile("../output/matrix.csv")
+func (p *pir) queryLocalDB(list []int, filename string) int {
+	rmc, err := utils.ReadMatrixFromFile(filename)
 	if err != nil {
 		panic(err)
 	}

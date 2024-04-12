@@ -69,7 +69,7 @@ func TestEndToEnd(b *testing.T) {
 	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
 
 	for i := 0; i < q*q; i++ {
-		sum, points := pir.Query(i, false)
+		sum, points := pir.QueryLocal(i, output)
 		dec := pir.Decode(sum, points)
 		row, col := utils.SingleIndexToRowCol(q, i)
 		if ori[row][col] != dec {
@@ -83,36 +83,19 @@ func TestEndToEndFromConfigKey(b *testing.T) {
 	d := 2
 	pir := NewPIR(Params{uint64(q), uint8(d)})
 	pir.GenFromConfig()
-	input := "../input/db.csv"
-	output := "../output/matrix.csv"
-	FakeDB(q, 6, input)
+	input := "../input/example_db.csv"
+	output := "../output/example_matrix.csv"
+	FakeDB(q, 10, input)
 
 	pir.Encode(input, output)
 	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
 
 	for i := 0; i < q*q; i++ {
-		sum, points := pir.Query(i, false)
+		sum, points := pir.QueryLocal(i, output)
 		dec := pir.Decode(sum, points)
 		row, col := utils.SingleIndexToRowCol(q, i)
 		if ori[row][col] != dec {
 			panic("Decoding ERROR")
 		}
 	}
-}
-
-func TestEncode(b *testing.T) {
-	q := 31
-	d := 2
-	pir := NewPIR(Params{uint64(q), uint8(d)})
-	pir.Gen()
-	input := "../input/db.csv"
-	output := "../output/matrix.csv"
-	FakeDB(q, 6, "../input/db.csv")
-
-	var totalDuration time.Duration
-
-	start := time.Now()
-	pir.Encode(input, output)
-	duration := time.Since(start)
-	totalDuration += duration
 }
