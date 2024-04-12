@@ -36,21 +36,7 @@ type pir struct {
 func NewPIR(params Params) *pir {
 	var pir pir
 
-	permutator, err := utils.NewPermutator(int(params.Q*params.Q), params.PermKey, params.PermTweak)
-	if err != nil {
-		fmt.Println("Error Creating Permutator:", err)
-		panic(err)
-	}
-
-	encryptor, err := utils.NewEncryptor(params.EncKey, int(params.Q))
-	if err != nil {
-		fmt.Println("Error Creating Encryptor:", err)
-		panic(err)
-	}
-
 	pir.params = params
-	pir.permutator = &permutator
-	pir.encryptor = &encryptor
 
 	return &pir
 }
@@ -87,9 +73,24 @@ func (p *pir) Gen() {
 		panic(err)
 	}
 
-	p.params.PermKey = key
-	p.params.PermTweak = tweak
-	p.params.EncKey = encKey
+	p.permutator = &permutator
+	p.encryptor = &encryptor
+}
+
+func (p *pir) GenFromConfig() {
+	keys := GetKeysFromConfig()
+	permutator, err := utils.NewPermutator(int(p.params.Q*p.params.Q), keys.PermKey, keys.PermTweak)
+	if err != nil {
+		fmt.Println("Error Creating Permutator:", err)
+		panic(err)
+	}
+
+	encryptor, err := utils.NewEncryptor(keys.EncKey, int(p.params.Q))
+	if err != nil {
+		fmt.Println("Error Creating Encryptor:", err)
+		panic(err)
+	}
+
 	p.permutator = &permutator
 	p.encryptor = &encryptor
 }
@@ -104,7 +105,7 @@ func (p *pir) Encode(input, output string) [][]int {
 
 func (p *pir) Query(i int, serverOn bool) (int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
-	query, points := p.prepareQuerySequenceAndDecodingKey(points)
+	query, points := p.prepareQuerySequence(points)
 	var response int
 	if serverOn {
 		response = p.queryServer(query)
@@ -219,7 +220,7 @@ func (pir *pir) permuteAndEncryptMatrix(rmc [][]int) {
 
 }
 
-func (pir *pir) prepareQuerySequenceAndDecodingKey(points []int) ([]int, []int) {
+func (pir *pir) prepareQuerySequence(points []int) ([]int, []int) {
 	var query []int
 	dec_sum := 0
 	q := int(pir.params.Q)
@@ -238,7 +239,7 @@ func (pir *pir) prepareQuerySequenceAndDecodingKey(points []int) ([]int, []int) 
 func (pir *pir) queryServer(list []int) int {
 	jsonData, _ := json.Marshal(list)
 
-	req, err := http.NewRequest("POST", pir.params.ServerUrl, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", utils.GetParameterConfig().ServerUrl, bytes.NewBuffer(jsonData))
 	if err != nil {
 		panic(err)
 	}

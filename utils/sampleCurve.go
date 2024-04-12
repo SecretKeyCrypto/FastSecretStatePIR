@@ -40,7 +40,7 @@ func EvaluatePolynomialForLargeField(coeffs []int, x int, q int) int {
 func GenerateRandomPolynomialCoeffs(degree, q, t, a int) []int {
 	coeffs := make([]int, degree+1)
 	for i := range coeffs {
-		coeffs[i] = rand.Intn(q) // Random int in [0, q-1]
+		coeffs[i] = rand.Intn(q)
 	}
 
 	coeffs[0] = (coeffs[0] - (EvaluatePolynomial(coeffs, t, q) - a) + q) % q

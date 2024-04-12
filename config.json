@@ -1,14 +1,6 @@
 {
-  "q": 2053,
-  "k": 4,
-  "encryptorKey": "zF8c77HQpAbnQ+0GUJOd5w==",
-  "permutatorConfig": {
-    "key": "4uGm7oEtj9DrIkW72yC05w==",
-    "tweak": "4aKJRtH2sDo=",
-    "maxNum": 4214855,
-    "minNum": 46,
-    "radix": 46,
-    "minLen": 2,
-    "maxLen": 4
-  }
+  "encryptorKey": "iQXbB2NzlPbGzIByr4n87w==",
+  "permutatorKey": "ym3QpPKSO/a/9dt8SIWQFw==",
+  "permutatorTweak": "nNoIvE+VrvE=",
+  "serverUrl": "http://10.1.61.31:8080"
 }

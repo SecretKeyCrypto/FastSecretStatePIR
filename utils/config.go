@@ -14,8 +14,6 @@ const (
 )
 
 type Config struct {
-	Q               int    `json:"q"`
-	K               int    `json:"k"`
 	EncyrptorKey    string `json:"encryptorKey"`
 	PermutatorKey   string `json:"permutatorKey"`
 	PermutatorTweak string `json:"permutatorTweak"`

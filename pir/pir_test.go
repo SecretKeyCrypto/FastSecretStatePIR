@@ -8,31 +8,10 @@ import (
 	"time"
 )
 
-func BenchmarkNewPIR(b *testing.B) {
-	pir := NewPIR(GetParamsFromConfig())
-	degree := int(pir.params.K)
-	q := int(pir.params.Q)
-	pir.Gen()
-
-	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var totalDuration time.Duration
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		target := rand.Intn(q * q)
-		start := time.Now()
-		utils.GenerateCurvePoints(degree, q, target)
-		duration := time.Since(start)
-		totalDuration += duration
-	}
-
-	b.StopTimer()
-	fmt.Printf("Average time per operation: %v\n", totalDuration)
-}
-
 func BenchmarkEncode(b *testing.B) {
-	pir := NewPIR(GetParamsFromConfig())
-	q := int(pir.params.Q)
+	q := 31
+	d := 4
+	pir := NewPIR(Params{uint64(q), uint8(d)})
 	pir.Gen()
 	input := "../input/db.csv"
 	output := "../output/matrix.csv"
@@ -50,31 +29,90 @@ func BenchmarkEncode(b *testing.B) {
 	}
 
 	b.StopTimer()
-	fmt.Printf("Average time per operation: %v\n", totalDuration)
+	fmt.Printf("Average time per operation: %v\n", totalDuration/time.Duration(b.N))
 }
 
-func BenchmarkDecoding(b *testing.B) {
-	pir := NewPIR(GetParamsFromConfig())
-	q := int(pir.params.Q)
-	FakeDB(q, 6)
-	var totalDuration time.Duration
+func BenchmarkGenerateQuery(b *testing.B) {
+	q := 65521
+	d := 2
+	pir := NewPIR(Params{uint64(q), uint8(d)})
+	pir.Gen()
 
-	pir.Encode("../input/db.csv", "../output/matrix.csv")
-	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
+	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var generateCurve, totalDuration time.Duration
 
 	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		target := rand.Intn(q * q)
+		start := time.Now()
+		points := utils.GenerateCurvePoints(d, q, target)
+		generateCurve += time.Since(start)
+		pir.prepareQuerySequence(points)
+		totalDuration += time.Since(start)
+	}
+
+	b.StopTimer()
+	fmt.Printf("Average time per generating points: %v\n", generateCurve/time.Duration(b.N))
+	fmt.Printf("Average time per generate query: %v\n", totalDuration/time.Duration(b.N))
+}
+
+func TestEndToEnd(b *testing.T) {
+	q := 31
+	d := 2
+	pir := NewPIR(Params{uint64(q), uint8(d)})
+	pir.Gen()
+	input := "../input/db.csv"
+	output := "../output/matrix.csv"
+	FakeDB(q, 6, input)
+
+	pir.Encode(input, output)
+	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
 
 	for i := 0; i < q*q; i++ {
-		start := time.Now()
 		sum, points := pir.Query(i, false)
 		dec := pir.Decode(sum, points)
-		duration := time.Since(start)
-		totalDuration += duration
 		row, col := utils.SingleIndexToRowCol(q, i)
 		if ori[row][col] != dec {
 			panic("Decoding ERROR")
 		}
 	}
-	b.StopTimer()
-	fmt.Printf("Average time per operation: %v\n", (totalDuration))
+}
+
+func TestEndToEndFromConfigKey(b *testing.T) {
+	q := 31
+	d := 2
+	pir := NewPIR(Params{uint64(q), uint8(d)})
+	pir.GenFromConfig()
+	input := "../input/db.csv"
+	output := "../output/matrix.csv"
+	FakeDB(q, 6, input)
+
+	pir.Encode(input, output)
+	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
+
+	for i := 0; i < q*q; i++ {
+		sum, points := pir.Query(i, false)
+		dec := pir.Decode(sum, points)
+		row, col := utils.SingleIndexToRowCol(q, i)
+		if ori[row][col] != dec {
+			panic("Decoding ERROR")
+		}
+	}
+}
+
+func TestEncode(b *testing.T) {
+	q := 31
+	d := 2
+	pir := NewPIR(Params{uint64(q), uint8(d)})
+	pir.Gen()
+	input := "../input/db.csv"
+	output := "../output/matrix.csv"
+	FakeDB(q, 6, "../input/db.csv")
+
+	var totalDuration time.Duration
+
+	start := time.Now()
+	pir.Encode(input, output)
+	duration := time.Since(start)
+	totalDuration += duration
 }
