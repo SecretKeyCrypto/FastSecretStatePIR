@@ -34,7 +34,9 @@ func BenchmarkEncode(b *testing.B) {
 	pir := NewPIR(GetParamsFromConfig())
 	q := int(pir.params.Q)
 	pir.Gen()
-	FakeDB(q, 6)
+	input := "../input/db.csv"
+	output := "../output/matrix.csv"
+	FakeDB(q, 6, "../input/db.csv")
 
 	var totalDuration time.Duration
 
@@ -42,7 +44,7 @@ func BenchmarkEncode(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		pir.Encode("../input/db.csv", "../output/matrix.csv")
+		pir.Encode(input, output)
 		duration := time.Since(start)
 		totalDuration += duration
 	}

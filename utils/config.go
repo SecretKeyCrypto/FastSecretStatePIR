@@ -22,14 +22,6 @@ type Config struct {
 	ServerUrl       string `json:"serverUrl"`
 }
 
-type PermutatorConfig struct {
-	Key    string `json:"key"`
-	Tweak  string `json:"tweak"`
-	MaxNum int    `json:"maxNum"`
-	Radix  int    `json:"radix"`
-	MaxLen int    `json:"maxLen"`
-}
-
 func (config *Config) Update() error {
 	jsonData, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -39,20 +31,8 @@ func (config *Config) Update() error {
 	return os.WriteFile(filename, jsonData, 0644)
 }
 
-func ReadConfigFromFile(filename string) (*Config, error) {
-	var config Config
-
-	jsonData, err := os.ReadFile(filename)
-	if err != nil {
-		return &config, err
-	}
-
-	err = json.Unmarshal(jsonData, &config)
-	return &config, err
-}
-
 func GetParameterConfig() *Config {
-	conf, err := ReadConfigFromFile(filename)
+	conf, err := readConfigFromFile(filename)
 	if err != nil {
 		fmt.Println("Error reading config from file:", err)
 		panic(err)
@@ -70,7 +50,7 @@ func GetParameterConfig() *Config {
 	}
 
 	if conf.PermutatorTweak == "" {
-		tweak, _ := GenerateRandomKey(tweakLength)
+		tweak, err := GenerateRandomKey(tweakLength)
 
 		if err != nil {
 			fmt.Println("Error Generating Permuator Tweak:", err)
@@ -96,4 +76,16 @@ func GetParameterConfig() *Config {
 	}
 
 	return conf
+}
+
+func readConfigFromFile(filename string) (*Config, error) {
+	var config Config
+
+	jsonData, err := os.ReadFile(filename)
+	if err != nil {
+		return &config, err
+	}
+
+	err = json.Unmarshal(jsonData, &config)
+	return &config, err
 }

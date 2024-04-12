@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func FakeDB(q int, n int) []int {
+func FakeDB(q int, n int, filename string) []int {
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	message := make([]int, n) // Create a slice to hold the numbers.
@@ -14,6 +14,6 @@ func FakeDB(q int, n int) []int {
 		message[i] = rand.Intn(q) // Generate a random number in [0, q).
 	}
 
-	utils.WriteSliceToCSV("../input/db.csv", message)
+	utils.WriteSliceToCSV(filename, message)
 	return message
 }

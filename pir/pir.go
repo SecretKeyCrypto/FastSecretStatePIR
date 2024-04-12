@@ -92,10 +92,6 @@ func (p *pir) Gen() {
 	p.params.EncKey = encKey
 	p.permutator = &permutator
 	p.encryptor = &encryptor
-
-	if err := p.params.UpdateConfig(); err != nil {
-		fmt.Println("Error writing config to file:", err)
-	}
 }
 
 func (p *pir) Encode(input, output string) [][]int {
