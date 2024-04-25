@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+const (
+	DBPath = "../input/"
+)
+
 func FakeDB(q int, n int, filename string) []int {
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
 
@@ -14,6 +18,6 @@ func FakeDB(q int, n int, filename string) []int {
 		message[i] = rand.Intn(q) // Generate a random number in [0, q).
 	}
 
-	utils.WriteSliceToCSV(filename, message)
+	utils.WriteSliceToCSV(DBPath+filename, message)
 	return message
 }

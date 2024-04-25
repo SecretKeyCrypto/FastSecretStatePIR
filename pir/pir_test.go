@@ -83,8 +83,8 @@ func TestEndToEndFromConfigKey(b *testing.T) {
 	d := 2
 	pir := NewPIR(Params{uint64(q), uint8(d)})
 	pir.GenFromConfig()
-	input := "../input/example_db.csv"
-	output := "../output/example_matrix.csv"
+	input := "example_db.csv"
+	output := "example_matrix.csv"
 	FakeDB(q, 10, input)
 
 	pir.Encode(input, output)
