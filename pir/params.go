@@ -17,9 +17,9 @@ type Keys struct {
 	EncKey    []byte
 }
 
-func GetKeysFromConfig() Keys {
+func GetKeysFromConfig(filename string) Keys {
 	var keys Keys
-	config := utils.GetParameterConfig()
+	config := utils.GetParameterConfig(filename)
 
 	key, err := base64.StdEncoding.DecodeString(config.PermutatorKey)
 	if err != nil {

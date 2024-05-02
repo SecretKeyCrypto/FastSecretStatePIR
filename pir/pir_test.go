@@ -82,7 +82,7 @@ func TestEndToEndFromConfigKey(b *testing.T) {
 	q := 31
 	d := 2
 	pir := NewPIR(Params{uint64(q), uint8(d)})
-	pir.GenFromConfig()
+	pir.GenFromConfig("../config.json")
 	input := "../input/example_db.csv"
 	output := "../output/example_matrix.csv"
 	FakeDB(q, 10, input)
@@ -97,5 +97,18 @@ func TestEndToEndFromConfigKey(b *testing.T) {
 		if ori[row][col] != dec {
 			panic("Decoding ERROR")
 		}
+	}
+}
+
+func TestQueryFromServer(b *testing.T) {
+	q := 31
+	d := 2
+	pir := NewPIR(Params{uint64(q), uint8(d)})
+	configFilename := "../config.json"
+	pir.GenFromConfig(configFilename)
+
+	for i := 0; i < q*q; i++ {
+		sum, points := pir.Query(i, utils.GetParameterConfig(configFilename).ServerUrl)
+		pir.Decode(sum, points)
 	}
 }

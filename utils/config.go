@@ -8,7 +8,6 @@ import (
 )
 
 const (
-	filename    = "../config.json"
 	keyLength   = 16
 	tweakLength = 8
 )
@@ -20,7 +19,7 @@ type Config struct {
 	ServerUrl       string `json:"serverUrl"`
 }
 
-func (config *Config) Update() error {
+func (config *Config) Update(filename string) error {
 	jsonData, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return err
@@ -29,7 +28,7 @@ func (config *Config) Update() error {
 	return os.WriteFile(filename, jsonData, 0644)
 }
 
-func GetParameterConfig() *Config {
+func GetParameterConfig(filename string) *Config {
 	conf, err := readConfigFromFile(filename)
 	if err != nil {
 		fmt.Println("Error reading config from file:", err)
@@ -69,7 +68,7 @@ func GetParameterConfig() *Config {
 		conf.EncyrptorKey = base64.StdEncoding.EncodeToString(key)
 	}
 
-	if err := conf.Update(); err != nil {
+	if err := conf.Update(filename); err != nil {
 		fmt.Println("Error writing config to file:", err)
 	}
 

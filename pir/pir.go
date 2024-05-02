@@ -13,7 +13,7 @@ import (
 type PIR interface {
 	Gen()
 	Encode(string, string) [][]int
-	Query(uint64) (int, []int)
+	Query(uint64, string) (int, []int)
 	Decode(int, []int) int
 }
 
@@ -77,8 +77,8 @@ func (p *pir) Gen() {
 	p.encryptor = &encryptor
 }
 
-func (p *pir) GenFromConfig() {
-	keys := GetKeysFromConfig()
+func (p *pir) GenFromConfig(filename string) {
+	keys := GetKeysFromConfig(filename)
 	permutator, err := utils.NewPermutator(int(p.params.Q*p.params.Q), keys.PermKey, keys.PermTweak)
 	if err != nil {
 		fmt.Println("Error Creating Permutator:", err)
@@ -103,10 +103,10 @@ func (p *pir) Encode(input, output string) [][]int {
 	return rmc
 }
 
-func (p *pir) Query(i int) (int, []int) {
+func (p *pir) Query(i int, url string) (int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
 	query, points := p.prepareQuerySequence(points)
-	response := p.queryServer(query)
+	response := p.queryServer(query, url)
 	return response, points
 }
 
@@ -236,10 +236,10 @@ func (pir *pir) prepareQuerySequence(points []int) ([]int, []int) {
 	return query, points
 }
 
-func (pir *pir) queryServer(list []int) int {
+func (pir *pir) queryServer(list []int, url string) int {
 	jsonData, _ := json.Marshal(list)
 
-	req, err := http.NewRequest("POST", utils.GetParameterConfig().ServerUrl, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		panic(err)
 	}
