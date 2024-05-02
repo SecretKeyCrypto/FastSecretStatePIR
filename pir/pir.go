@@ -20,8 +20,6 @@ type PIR interface {
 const (
 	keyLength   = 16
 	tweakLength = 8
-	inputPath   = "../input/"
-	outputPath  = "../output/"
 )
 
 type Response struct {
@@ -99,9 +97,9 @@ func (p *pir) GenFromConfig() {
 
 func (p *pir) Encode(input, output string) [][]int {
 	inter := "../output/inter.csv"
-	rmc := RMEncoding(inputPath+input, inter, int(p.params.Q), int(p.params.K))
+	rmc := RMEncoding(input, inter, int(p.params.Q), int(p.params.K))
 	p.permuteAndEncryptMatrix(rmc)
-	utils.WriteMatrixToFile(rmc, outputPath+output)
+	utils.WriteMatrixToFile(rmc, output)
 	return rmc
 }
 
@@ -115,7 +113,7 @@ func (p *pir) Query(i int) (int, []int) {
 func (p *pir) QueryLocal(i int, filename string) (int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
 	query, points := p.prepareQuerySequence(points)
-	response := p.queryLocalDB(query, outputPath+filename)
+	response := p.queryLocalDB(query, filename)
 	return response, points
 }
 
