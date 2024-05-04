@@ -1,15 +1,14 @@
 using Polynomials, Nemo, AbstractAlgebra, CSV, DataFrames, Serialization, DelimitedFiles
 include("FastEvaluationOnPrimeField.jl")
 ################################################################################
-#                 Examples
+#                 Q-ary Systematic Reed-Muller Encoding RM(2, d)
+# Input:
+#    - message: A list of integers in [0,...,q-1]
+#    - q: Finite Field Size
+#    - d: Total Degree of the Polynomial for Reed-Muller Code
+# Output:
+#    - A RM(2, d) Code
 ################################################################################
-function randPoly(q, d)
-    Fq, _ = FiniteField(q, 1, "x")
-    R, _ = PolynomialRing(Fq, "x")
-    f = R(rand(0:q-1, d))
-    return f
-end
-
 function RMEncoding(message, q, d)
     Fq = FiniteField(q, 1, "x")[1]
     R, x = PolynomialRing(Fq, "x")
@@ -17,11 +16,15 @@ function RMEncoding(message, q, d)
     matt = zeros(Int64, q, q)
     index = 1
 
+    # Put the message on the upper-left triange, which means the matt[i][j] where i+j <= d+2
     for i = 1:d+1
         matt[1:d+2-i, i] = message[index: index + d+1-i]
         index += d+2-i
     end
 
+    # View Bi-variate polynomial P as
+    #         P = f_0 * x^0 + f_1 * x +...+ f_d * x^d
+    # while f_i is a univariage polynomail for the second variable.
     for j in d+1:-1:1
         x_values = [Fq(i) for i in 0:j-1]
         y_values = [Fq(i) for i in [matt[i, d+2-j] for i in 1:j]]
@@ -30,6 +33,7 @@ function RMEncoding(message, q, d)
             y_values -= [Fq(i)^(d-t) for i in 0:j-1] .* matt[d+1-t, d+2-j]
         end
 
+        # Determine the values of of f_(d-j)(0),...,f_(d-j)(d-j)
         interp_poly = interpolate(R, x_values, y_values)
 
         for i in 0:j-1
@@ -38,6 +42,8 @@ function RMEncoding(message, q, d)
         
         x_values = [Fq(i) for i in 0:d+1-j]
         y_values = [Fq(i) for i in [matt[j, i] for i in 1:d+2-j]]
+
+        # Interpolate the coefficient of f_(d-j)
         interp_poly = interpolate(R, x_values, y_values)
         for k in d+3-j:q
             matt[j, k] = toInt(interp_poly(k-1))
@@ -46,6 +52,9 @@ function RMEncoding(message, q, d)
 
     modtree = buildModTree(q)
 
+    # Now in each col, the first q elements are evaluations of f_j on 0,...,q-1,
+    # Then view each col as a univariate polynomial w.r.t. the second variable.
+    # This evaluation coincide with the bi-variable polynomial evaluation.
     for col in 1:q
         matt[:, col] = [toInt(i) for i in uniVWithTree(R(matt[:, col]), q, modtree)]
     end
