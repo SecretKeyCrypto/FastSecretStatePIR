@@ -10,8 +10,8 @@ include("FastEvaluationOnPrimeField.jl")
 #    - A RM(2, d) Code
 ################################################################################
 function RMEncoding(message, q, d)
-    Fq = FiniteField(q, 1, "x")[1]
-    R, x = PolynomialRing(Fq, "x")
+    Fq = finite_field(q, 1, "x")[1]
+    R, x = polynomial_ring(Fq, "x")
 
     matt = zeros(Int64, q, q)
     index = 1

@@ -1,0 +1,8 @@
+[deps]
+AbstractAlgebra = "c3fe647b-3220-5bb0-a1ea-a7954cac585d"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
+Nemo = "2edaba10-b0f1-5616-af89-8c11ac63239a"
+Polynomials = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
+Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"

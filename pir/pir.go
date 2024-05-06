@@ -159,7 +159,7 @@ func RMEncoding(input, output string, q, k int) (matrix [][]int) {
 	arg_q := fmt.Sprint(q)
 	arg_k := fmt.Sprint(k)
 
-	cmd := exec.Command(juliaPath, scriptPath, input, output, arg_q, arg_k)
+	cmd := exec.Command(juliaPath, "--project=."+scriptPath, input, output, arg_q, arg_k)
 
 	var out bytes.Buffer
 	cmd.Stdout = &out

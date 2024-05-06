@@ -7,10 +7,10 @@ function uniVFastEvaluate(f::Vector{T}, p::Integer) where {T<:Integer}
     return uniVFastEvaluate(Polynomial(f), p)
 end
 
-function uniVWithTree(f::fqPolyRepPolyRingElem, p::Integer, modTree::Vector{fqPolyRepPolyRingElem})
-    result = Vector{fqPolyRepPolyRingElem}()
-    Fq, _ = FiniteField(p, 1, "x")
-    R, x = PolynomialRing(Fq, "x")
+function uniVWithTree(f::FqPolyRingElem, p::Integer, modTree::Vector{FqPolyRingElem})
+    result = Vector{FqPolyRingElem}()
+    Fq, _ = finite_field(p, 1, "x")
+    R, x = polynomial_ring(Fq, "x")
     n = lastindex(modTree)
     # Mod f of (x^p - x) which equals 0 in ring of Fp
     if length(f) > p
@@ -25,11 +25,11 @@ function uniVWithTree(f::fqPolyRepPolyRingElem, p::Integer, modTree::Vector{fqPo
     return circshift(result[n:-1:n-p+1], 1)
 end
 
-function uniVFastEvaluate(f::fqPolyRepPolyRingElem, p::Integer)
+function uniVFastEvaluate(f::FqPolyRingElem, p::Integer)
     modTree = buildModTree(p)
-    result = Vector{fqPolyRepPolyRingElem}()
-    Fq, _ = FiniteField(p, 1, "x")
-    R, x = PolynomialRing(Fq, "x")
+    result = Vector{FqPolyRingElem}()
+    Fq, _ = finite_field(p, 1, "x")
+    R, x = polynomial_ring(Fq, "x")
     n = lastindex(modTree)
     # Mod f of (x^p - x) which equals 0 in ring of Fp
     if length(f) > p
@@ -48,8 +48,8 @@ end
 #                 Uni-Variate Polynomial Interpolation on Fp
 ################################################################################
 function buildLinearCombinationTree(p::Integer, n::Integer, x::Vector{}, y::Vector{})
-    Fq, _ = FiniteField(p, 1, "x")
-    R, _ = PolynomialRing(Fq, "x")
+    Fq, _ = finite_field(p, 1, "x")
+    R, _ = polynomial_ring(Fq, "x")
     tree = map(i -> R([Fq(-i),Fq(1)]), collect(1:p))
     m = prod(tree)
     a = divrem.(m, tree)
@@ -62,8 +62,8 @@ end
 #                 Ref: Modern Computer Algebra Chapter 10.1
 ################################################################################
 function buildModTree(q::Integer)
-    Fq = FiniteField(q, 1, "x")[1]
-    R = PolynomialRing(Fq, "x")[1]
+    Fq = finite_field(q, 1, "x")[1]
+    R = polynomial_ring(Fq, "x")[1]
     tree = map(i -> R([Fq(-i),Fq(1)]), collect(1:q))
     append!(tree, [R([Fq(1)]) for i in 1:(Integer(2^ceil(log2(q))) - q)])
 
@@ -105,15 +105,15 @@ end
 ################################################################################
 function genZeroPointPoly(i, p)
     # Convert i to an element of Fq and create a polynomial -i + x
-    Fq, x = FiniteField(p, 1, "x")
+    Fq, x = finite_field(p, 1, "x")
     return -Fq(i) + x
 end
 
-function toInt(i::fqPolyRepFieldElem)
+function toInt(i::FqFieldElem)
     return parse(Int64, string(i))
 end
 
-function toInt(i::fqPolyRepPolyRingElem)
+function toInt(i::FqPolyRingElem)
     if length(i) > 1
         throw(ArgumentError("This only works for constant polynomials."))
     end
