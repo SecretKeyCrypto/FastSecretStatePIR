@@ -10,7 +10,7 @@ import (
 const (
 	feistelMin    = 100
 	blockSize     = aes.BlockSize
-	numRounds     = 10
+	numRounds     = 1
 	halfBlockSize = blockSize / 2
 )
 
@@ -27,6 +27,9 @@ type Permutator struct {
 	// Re-usable CBC encryptor with exported SetIV function
 	cbcEncryptor cipher.BlockMode
 	P            []byte
+	PQ           []byte
+	R            []byte
+	buf64        []byte
 	b            int
 	d            int
 	lenQ         int
@@ -98,6 +101,9 @@ func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
 	newPermutator.lenPQ = blockSize + lenQ
 	newPermutator.numPad = numPad
 	newPermutator.P = P
+	newPermutator.PQ = make([]byte, newPermutator.lenPQ)
+	newPermutator.R = make([]byte, newPermutator.lenPQ)
+	newPermutator.buf64 = make([]byte, 8)
 	newPermutator.numModU = uint64(math.Pow(float64(radix), float64(u)))
 	newPermutator.numModV = uint64(math.Pow(float64(radix), float64(v)))
 
@@ -118,8 +124,8 @@ func (p Permutator) Permute(X uint64) (uint64, error) {
 func (p Permutator) Encrypt(X uint64) uint64 {
 	t := len(p.tweak)
 
-	PQ := make([]byte, p.lenPQ)
-	R := make([]byte, p.lenPQ)
+	PQ := p.PQ
+	R := p.R
 
 	Q := PQ[blockSize:]
 	copy(Q[:t], p.tweak)
@@ -127,7 +133,7 @@ func (p Permutator) Encrypt(X uint64) uint64 {
 
 	var numA, numB, numC, numY uint64
 
-	numUint64Bytes := make([]byte, 8)
+	numUint64Bytes := p.buf64
 
 	Y := R[p.lenPQ-blockSize:]
 
@@ -201,8 +207,8 @@ func (p Permutator) Revert(X uint64) (uint64, error) {
 }
 
 func (p Permutator) Decrypt(X uint64) uint64 {
-	PQ := make([]byte, p.lenPQ)
-	buf_R := make([]byte, p.lenPQ)
+	PQ := p.PQ
+	buf_R := p.R
 	Q := PQ[blockSize:]
 	t := len(p.tweak)
 
@@ -211,7 +217,7 @@ func (p Permutator) Decrypt(X uint64) uint64 {
 
 	var numA, numB, numC, numY uint64
 
-	numUint64Bytes := make([]byte, 8)
+	numUint64Bytes := p.buf64
 
 	Y := buf_R[p.lenPQ-blockSize:]
 
