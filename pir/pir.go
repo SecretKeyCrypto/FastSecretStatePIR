@@ -30,6 +30,9 @@ type pir struct {
 	params     Params
 	permutator *utils.Permutator
 	encryptor  *utils.Encryptor
+	juliaCmd   *exec.Cmd
+	juliaCmdIn io.WriteCloser
+	juliaCmdOut io.ReadCloser
 }
 
 // This works for any database size less than Q^2/2K^2
@@ -38,7 +41,45 @@ func NewPIR(params Params) *pir {
 
 	pir.params = params
 
+	juliaPath, err1 := findJuliaPath()
+	if err1 != nil {
+		juliaPath = "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
+	}
+
+	scriptPath := "../encoding/GoRMEInterface.jl"
+
+	juliaCmd := exec.Command(juliaPath, scriptPath)
+	pir.juliaCmd = juliaCmd
+
+	juliaCmdIn, err := pir.juliaCmd.StdinPipe()
+	pir.juliaCmdIn = juliaCmdIn
+	if err != nil {
+		fmt.Println("Error getting stdin of Julia:", err)
+		panic(err)
+	}
+
+	juliaCmdOut, err := pir.juliaCmd.StdoutPipe()
+	pir.juliaCmdOut = juliaCmdOut
+	if err != nil {
+		fmt.Println("Error getting stdout of Julia:", err)
+		panic(err)
+	}
+
+	err = pir.juliaCmd.Start()
+	if err != nil {
+		fmt.Println("Error starting Julia:", err)
+		panic(err)
+	}
+
 	return &pir
+}
+
+func (p *pir) Close() {
+	err := p.juliaCmd.Wait()
+	if err != nil {
+		fmt.Println("Error waiting for Julia:", err)
+		panic(err)
+	}
 }
 
 func (p *pir) Gen() {
@@ -97,7 +138,7 @@ func (p *pir) GenFromConfig(filename string) {
 
 func (p *pir) Encode(input, output string) [][]int {
 	inter := "../output/inter.csv"
-	rmc := RMEncoding(input, inter, int(p.params.Q), int(p.params.K))
+	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K))
 	p.permuteAndEncryptMatrix(rmc)
 	utils.WriteMatrixToFile(rmc, output)
 	return rmc
@@ -148,26 +189,15 @@ func findJuliaPath() (string, error) {
 	return path, nil
 }
 
-func RMEncoding(input, output string, q, k int) (matrix [][]int) {
-	juliaPath, err1 := findJuliaPath()
-	if err1 != nil {
-		juliaPath = "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
-	}
-
-	scriptPath := "../encoding/GoRMEInterface.jl"
-
-	arg_q := fmt.Sprint(q)
-	arg_k := fmt.Sprint(k)
-
-	cmd := exec.Command(juliaPath, "--project=."+scriptPath, input, output, arg_q, arg_k)
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	err := cmd.Run()
+func (pir *pir) RMEncoding(input, output string, q, k int) (matrix [][]int) {
+	juliaArgs := fmt.Sprintf("%s %s %d %d\n", input, output, q, k)
+	_, err := pir.juliaCmdIn.Write([]byte(juliaArgs))
 	if err != nil {
-		fmt.Println("Error executing Julia:", err)
+		fmt.Println("Error writing to Julia:", err)
 		panic(err)
 	}
+	var b []byte = make([]byte, 1)
+	pir.juliaCmdOut.Read(b)
 
 	matrix, err = utils.ReadMatrixFromFile(output)
 	if err != nil {

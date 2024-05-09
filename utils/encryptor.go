@@ -11,6 +11,8 @@ type Encryptor struct {
 	cipher  cipher.Block
 	q       uint64
 	maxModq uint64
+	plaintext []byte
+	ciphertext []byte
 }
 
 func NewEncryptor(key []byte, q int) (Encryptor, error) {
@@ -25,12 +27,13 @@ func NewEncryptor(key []byte, q int) (Encryptor, error) {
 	encryptor.cipher = blockcipher
 	encryptor.q = uint64(q)
 	encryptor.maxModq = (math.MaxUint64%encryptor.q + 1) % encryptor.q
+	encryptor.plaintext = make([]byte, aes.BlockSize)
+	encryptor.ciphertext = make([]byte, aes.BlockSize)
 
 	return encryptor, nil
 }
 
-func generatePlaintextFromCoordinate(row, col int) []byte {
-	plaintext := make([]byte, aes.BlockSize)
+func generatePlaintextFromCoordinate(row, col int, plaintext []byte) []byte {
 	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(row))
 	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(col))
 	return plaintext
@@ -43,17 +46,12 @@ func (e Encryptor) Encrypt(row, col, data int) int {
 }
 
 func (e Encryptor) EncryptPosition(row, col int) int {
-	plaintext := generatePlaintextFromCoordinate(row, col)
+	generatePlaintextFromCoordinate(row, col, e.plaintext)
 
-	if len(plaintext)%aes.BlockSize != 0 {
-		panic("Plaintext length for aes encryption not valid!")
-	}
+	e.cipher.Encrypt(e.ciphertext, e.plaintext)
 
-	ciphertext := make([]byte, len(plaintext))
-	e.cipher.Encrypt(ciphertext, plaintext)
-
-	A1 := binary.BigEndian.Uint64(ciphertext[:8])
-	A2 := binary.BigEndian.Uint64(ciphertext[8:])
+	A1 := binary.BigEndian.Uint64(e.ciphertext[:8])
+	A2 := binary.BigEndian.Uint64(e.ciphertext[8:])
 
 	// For demonstration, let's perform a modulus operation on A1 and A2 with q
 	q := uint64(e.q) // Example modulus
