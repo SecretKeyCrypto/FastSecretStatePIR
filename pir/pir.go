@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os/exec"
 	"rme/utils"
@@ -27,11 +28,11 @@ type Response struct {
 }
 
 type pir struct {
-	params     Params
-	permutator *utils.Permutator
-	encryptor  *utils.Encryptor
-	juliaCmd   *exec.Cmd
-	juliaCmdIn io.WriteCloser
+	params      Params
+	permutator  *utils.Permutator
+	encryptor   *utils.Encryptor
+	juliaCmd    *exec.Cmd
+	juliaCmdIn  io.WriteCloser
 	juliaCmdOut io.ReadCloser
 }
 
@@ -95,7 +96,7 @@ func (p *pir) Gen() {
 		panic(err)
 	}
 
-	permutator, err := utils.NewPermutator(int(p.params.Q*p.params.Q), key, tweak)
+	permutator, err := utils.NewPermutator(int(math.Pow(float64(p.params.Q), float64(p.params.M))), key, tweak)
 	if err != nil {
 		fmt.Println("Error Creating Permutator:", err)
 		panic(err)
@@ -120,7 +121,7 @@ func (p *pir) Gen() {
 
 func (p *pir) GenFromConfig(filename string) {
 	keys := GetKeysFromConfig(filename)
-	permutator, err := utils.NewPermutator(int(p.params.Q*p.params.Q), keys.PermKey, keys.PermTweak)
+	permutator, err := utils.NewPermutator(int(math.Pow(float64(p.params.Q), float64(p.params.M))), keys.PermKey, keys.PermTweak)
 	if err != nil {
 		fmt.Println("Error Creating Permutator:", err)
 		panic(err)
@@ -136,11 +137,19 @@ func (p *pir) GenFromConfig(filename string) {
 	p.encryptor = &encryptor
 }
 
-func (p *pir) Encode(input, output string) [][]int {
+func (p *pir) Encode(input, output string) Matrix {
 	inter := "../output/inter.csv"
-	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K))
+
+	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M))
 	p.permuteAndEncryptMatrix(rmc)
-	utils.WriteMatrixToFile(rmc, output)
+
+	switch m := rmc.(type) {
+	case *Matrix2D:
+		utils.Write2DMatrixToFile(m.data, output)
+	case *Matrix3D:
+		utils.Write3DMatrixToFile(m.data, output)
+	}
+
 	return rmc
 }
 
@@ -152,9 +161,21 @@ func (p *pir) Query(i int, url string) (int, []int) {
 }
 
 func (p *pir) QueryLocal(i int, filename string) (int, []int) {
-	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
-	query, points := p.prepareQuerySequence(points)
-	response := p.queryLocalDB(query, filename)
+	var points []int
+	var query []int
+	var response int
+
+	switch p.params.M {
+	case 2:
+		points = utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
+		query, points = p.prepareQuerySequence(points)
+		response = p.queryLocalDB(query, filename)
+	case 3:
+		points = utils.GenerateCurvePoints3D(int(p.params.K), int(p.params.Q), int(i))
+		query, points = p.prepareQuerySequence(points)
+		response = p.queryLocalDB3D(query, filename)
+	}
+
 	return response, points
 }
 
@@ -163,9 +184,7 @@ func (pir *pir) Decode(sum int, points []int) int {
 	q := int(pir.params.Q)
 	for _, point := range points {
 		po, _ := pir.permutator.Permute(uint64(point))
-
-		row, col := utils.SingleIndexToRowCol(q, int(po))
-		dec_sum += pir.encryptor.EncryptPosition(row, col)
+		dec_sum += pir.encryptor.EncryptPosition(int(po))
 		dec_sum %= q
 	}
 
@@ -189,8 +208,8 @@ func findJuliaPath() (string, error) {
 	return path, nil
 }
 
-func (pir *pir) RMEncoding(input, output string, q, k int) (matrix [][]int) {
-	juliaArgs := fmt.Sprintf("%s %s %d %d\n", input, output, q, k)
+func (pir *pir) RMEncoding(input, output string, q, k, m int) Matrix {
+	juliaArgs := fmt.Sprintf("%s %s %d %d %d\n", input, output, q, k, m)
 	_, err := pir.juliaCmdIn.Write([]byte(juliaArgs))
 	if err != nil {
 		fmt.Println("Error writing to Julia:", err)
@@ -199,52 +218,54 @@ func (pir *pir) RMEncoding(input, output string, q, k int) (matrix [][]int) {
 	var b []byte = make([]byte, 1)
 	pir.juliaCmdOut.Read(b)
 
-	matrix, err = utils.ReadMatrixFromFile(output)
-	if err != nil {
-		fmt.Println("Error Reading Matrix From Julia Output:", err)
-		panic(err)
+	switch m {
+	case 3:
+		mat, err := utils.Read3DMatrixFromFile(output, q)
+		if err != nil {
+			fmt.Println("Error Reading Matrix From Julia Output:", err)
+			panic(err)
+		}
+		return &Matrix3D{data: mat, q: q}
+	default:
+		mat, err := utils.ReadMatrixFromFile(output)
+		if err != nil {
+			fmt.Println("Error Reading Matrix From Julia Output:", err)
+			panic(err)
+		}
+		return &Matrix2D{data: mat, q: q}
 	}
-	return
 }
 
-func (pir *pir) permuteAndEncryptMatrix(rmc [][]int) {
+func (pir *pir) permuteAndEncryptMatrix(rmc Matrix) {
 	var ciphertextInt64 uint64
-	var val int
-	var new_row int
-	var new_col int
 	var new_data int
 
-	visited := make([][]bool, len(rmc))
-	for i := range visited {
-		visited[i] = make([]bool, len(rmc[0]))
-	}
+	visited := make([]bool, rmc.Size())
 
-	q := len(rmc)
-	cur_row := 0
-	cur_col := 0
-	data := rmc[cur_row][cur_col]
+	data := rmc.GetByIndex(0)
+
+	index := 0
+	new_index := 0
 
 	for {
-		val = utils.RowColToSingleIndex(q, cur_row, cur_col)
-		ciphertextInt64, _ = pir.permutator.Permute(uint64(val))
-		new_row, new_col = utils.SingleIndexToRowCol(q, int(ciphertextInt64))
+		ciphertextInt64, _ = pir.permutator.Permute(uint64(index))
+		new_index = int(ciphertextInt64)
 
-		if visited[new_row][new_col] {
-			cur_row = cur_row + (cur_col+1)/q
-			cur_col = (cur_col + 1) % q
-			if cur_row == q {
+		if visited[new_index] {
+			index += 1
+			if index == len(visited) {
 				break
 			}
 
-			data = rmc[cur_row][cur_col]
+			data = rmc.GetByIndex(index)
 		} else {
-			new_data = rmc[new_row][new_col]
-			rmc[new_row][new_col] = pir.encryptor.Encrypt(new_row, new_col, data)
+			new_data = rmc.GetByIndex(new_index)
+
+			rmc.SetByIndex(new_index, pir.encryptor.Encrypt(new_index, data))
 
 			data = new_data
-			cur_row = new_row
-			cur_col = new_col
-			visited[new_row][new_col] = true
+			index = new_index
+			visited[new_index] = true
 		}
 	}
 
@@ -257,9 +278,7 @@ func (pir *pir) prepareQuerySequence(points []int) ([]int, []int) {
 	for _, point := range points {
 		po, _ := pir.permutator.Permute(uint64(point))
 		query = append(query, int(po))
-
-		row, col := utils.SingleIndexToRowCol(q, int(po))
-		dec_sum += pir.encryptor.EncryptPosition(row, col)
+		dec_sum += pir.encryptor.EncryptPosition(int(po))
 		dec_sum %= q
 	}
 
@@ -306,6 +325,23 @@ func (p *pir) queryLocalDB(list []int, filename string) int {
 	for _, i := range list {
 		row, col := utils.SingleIndexToRowCol(int(p.params.Q), i)
 		res += rmc[row][col]
+		res %= int(p.params.Q)
+	}
+
+	return res
+}
+
+func (p *pir) queryLocalDB3D(list []int, filename string) int {
+	rmc, err := utils.Read3DMatrixFromFile(filename, int(p.params.Q))
+	if err != nil {
+		panic(err)
+	}
+
+	res := 0
+
+	for _, i := range list {
+		x, y, z := utils.SingleIndexToRowCol3D(int(p.params.Q), i)
+		res += rmc[x][y][z]
 		res %= int(p.params.Q)
 	}
 

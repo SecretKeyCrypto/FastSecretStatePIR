@@ -8,10 +8,10 @@ import (
 )
 
 type Encryptor struct {
-	cipher  cipher.Block
-	q       uint64
-	maxModq uint64
-	plaintext []byte
+	cipher     cipher.Block
+	q          uint64
+	maxModq    uint64
+	plaintext  []byte
 	ciphertext []byte
 }
 
@@ -33,20 +33,20 @@ func NewEncryptor(key []byte, q int) (Encryptor, error) {
 	return encryptor, nil
 }
 
-func generatePlaintextFromCoordinate(row, col int, plaintext []byte) []byte {
-	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(row))
-	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(col))
+func generatePlaintextFromIndex(index int, plaintext []byte) []byte {
+	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(index))
+	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(0))
 	return plaintext
 }
 
 // encryptBlock encrypts a single block of plaintext using AES in ECB mode.
-func (e Encryptor) Encrypt(row, col, data int) int {
+func (e Encryptor) Encrypt(index, data int) int {
 
-	return (e.EncryptPosition(row, col) + (data)) % int(e.q)
+	return (e.EncryptPosition(index) + (data)) % int(e.q)
 }
 
-func (e Encryptor) EncryptPosition(row, col int) int {
-	generatePlaintextFromCoordinate(row, col, e.plaintext)
+func (e Encryptor) EncryptPosition(index int) int {
+	generatePlaintextFromIndex(index, e.plaintext)
 
 	e.cipher.Encrypt(e.ciphertext, e.plaintext)
 
@@ -62,6 +62,6 @@ func (e Encryptor) EncryptPosition(row, col int) int {
 	return int(result)
 }
 
-func (e Encryptor) Decrypt(row, col, data int) int {
-	return (-e.EncryptPosition(row, col) + (data) + int(e.q)) % int(e.q)
+func (e Encryptor) Decrypt(index, data int) int {
+	return (-e.EncryptPosition(index) + (data) + int(e.q)) % int(e.q)
 }

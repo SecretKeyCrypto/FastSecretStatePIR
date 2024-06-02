@@ -63,3 +63,45 @@ func GenerateCurvePoints(degree, q, i int) []int {
 	}
 	return points
 }
+
+func GenerateCurvePoints3D(degree, q, i int) []int {
+	x, y, z := SingleIndexToRowCol3D(q, i)
+	t := rand.Intn(q)
+	uni_x := GenerateRandomPolynomialCoeffs(degree, q, t, x)
+	uni_y := GenerateRandomPolynomialCoeffs(degree, q, t, y)
+	uni_z := GenerateRandomPolynomialCoeffs(degree, q, t, z)
+
+	var points []int
+	for i = 0; i < q; i++ {
+		if i != t {
+			point_x := EvaluatePolynomial(uni_x, i, q)
+			point_y := EvaluatePolynomial(uni_y, i, q)
+			point_z := EvaluatePolynomial(uni_z, i, q)
+
+			points = append(points, RowColToSingleIndex3D(q, point_x, point_y, point_z))
+		}
+	}
+	return points
+}
+
+func GenerateCurvePoints4D(degree, q, i int) []int {
+	x, y, z, v := SingleIndexToRowCol4D(q, i)
+	t := rand.Intn(q)
+	uni_x := GenerateRandomPolynomialCoeffs(degree, q, t, x)
+	uni_y := GenerateRandomPolynomialCoeffs(degree, q, t, y)
+	uni_z := GenerateRandomPolynomialCoeffs(degree, q, t, z)
+	uni_v := GenerateRandomPolynomialCoeffs(degree, q, t, v)
+
+	var points []int
+	for i = 0; i < q; i++ {
+		if i != t {
+			point_x := EvaluatePolynomial(uni_x, i, q)
+			point_y := EvaluatePolynomial(uni_y, i, q)
+			point_z := EvaluatePolynomial(uni_z, i, q)
+			point_v := EvaluatePolynomial(uni_v, i, q)
+
+			points = append(points, RowColToSingleIndex4D(q, point_x, point_y, point_z, point_v))
+		}
+	}
+	return points
+}

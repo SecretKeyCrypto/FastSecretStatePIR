@@ -9,7 +9,7 @@ include("FastEvaluationOnPrimeField.jl")
 # Output:
 #    - A RM(2, d) Code
 ################################################################################
-function RMEncoding(message, q, d)
+function RMEncoding(message, q, d, m)
     Fq = finite_field(q, 1, "x")[1]
     R, x = polynomial_ring(Fq, "x")
 
@@ -92,9 +92,9 @@ function simpleTest(rmc, q)
     @assert sum([rmc[i,i] for i in 1:q]) % q == 0
 end
 
-function RME(message::Vector{Int}, d::Int, q::Int)
-    @assert (d+1) * (d+2) == 2*length(message)
-    rmc = RMEncoding(message, q, d)
+function RME(message::Vector{Int}, d::Int, q::Int, m::Int)
+    @assert binomial(d+m, m) == length(message)
+    rmc = RMEncoding(message, q, d, m)
     systematic_test(message, rmc, d)
     simpleTest(rmc, q)
     return rmc

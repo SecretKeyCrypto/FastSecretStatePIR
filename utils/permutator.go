@@ -10,7 +10,7 @@ import (
 const (
 	feistelMin    = 100
 	blockSize     = aes.BlockSize
-	numRounds     = 1
+	numRounds     = 4
 	halfBlockSize = blockSize / 2
 )
 

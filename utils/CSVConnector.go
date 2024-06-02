@@ -8,10 +8,10 @@ import (
 	"strconv"
 )
 
-func WriteMatrixToFile(matrix [][]int, filename string) error {
+func Write2DMatrixToFile(matrix [][]int, filename string) error {
 	file, err := os.Create(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating file: %v", err)
 	}
 	defer file.Close()
 
@@ -19,12 +19,37 @@ func WriteMatrixToFile(matrix [][]int, filename string) error {
 	defer writer.Flush()
 
 	for _, row := range matrix {
-		stringRow := make([]string, len(row))
-		for i, value := range row {
-			stringRow[i] = strconv.Itoa(value) // Convert each integer to a string
+		strRow := make([]string, len(row))
+		for i, val := range row {
+			strRow[i] = strconv.Itoa(val)
 		}
-		if err := writer.Write(stringRow); err != nil {
-			return err // Return early on write error
+		if err := writer.Write(strRow); err != nil {
+			return fmt.Errorf("error writing row to file: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func Write3DMatrixToFile(matrix [][][]int, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("error creating file: %v", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	for _, layer := range matrix {
+		for _, row := range layer {
+			strRow := make([]string, len(row))
+			for i, val := range row {
+				strRow[i] = strconv.Itoa(val)
+			}
+			if err := writer.Write(strRow); err != nil {
+				return fmt.Errorf("error writing row to file: %v", err)
+			}
 		}
 	}
 
@@ -88,4 +113,51 @@ func ReadMatrixFromFile(filename string) ([][]int, error) {
 	}
 
 	return matrix, nil
+}
+
+func Read3DMatrixFromFile(filename string, q int) ([][][]int, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	matrix3D := make([][][]int, q)
+	for i := range matrix3D {
+		matrix3D[i] = make([][]int, q)
+		for j := range matrix3D[i] {
+			matrix3D[i][j] = make([]int, q)
+		}
+	}
+
+	reader := csv.NewReader(file)
+	layer := 0
+	row := 0
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		// Avoid empty line between layers
+		if len(record) == 0 {
+			continue
+		}
+
+		for col, val := range record {
+			num, err := strconv.Atoi(val)
+			if err != nil {
+				return nil, err
+			}
+			matrix3D[layer][row][col] = num
+		}
+		row++
+		layer += row / q
+		row %= q
+	}
+
+	return matrix3D, nil
 }
