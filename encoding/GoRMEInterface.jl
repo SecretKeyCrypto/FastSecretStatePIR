@@ -14,14 +14,16 @@ function find_smallest_d(n, m)
 end
 
 for line in eachline(stdin)
-    input, output, arg_q, arg_k, arg_m = split(line, " ")
+    input, output, arg_q, arg_k, arg_m, arg_h = split(line, " ")
     q = parse(Int, arg_q)
     k = parse(Int, arg_k)
     m = parse(Int, arg_m)
+    h = parse(Int, arg_h)
 
     df = CSV.read(input, DataFrame, header=false)
 
     message = collect(Tuple(df[1, :]))
+    append!(message, zeros(Int, h))
 
     n = length(message)
 
@@ -29,10 +31,10 @@ for line in eachline(stdin)
     if (d * k + 1 >= q)
         throw(ErrorException("The length of n ($n) message can't be encoded with field size ($q) and degree ($k)."))
     elseif (n < binomial(m+d, d))
-        append!(message, rand(0:q-1, binomial(m+d, d)-n))
+        append!(message, zeros(Int, binomial(m+d, d)-n))
     end
 
-    rmc = RME(message, d, q, m)
+    rmc = RME(message, d, q, m, h)
     df = DataFrame(rmc, :auto)
     CSV.write(output, df, header=false)
     println()

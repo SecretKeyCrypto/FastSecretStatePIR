@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
 	"os/exec"
 	"rme/utils"
@@ -34,6 +35,7 @@ type pir struct {
 	juliaCmd    *exec.Cmd
 	juliaCmdIn  io.WriteCloser
 	juliaCmdOut io.ReadCloser
+	Hints       map[int]struct{}
 }
 
 // This works for any database size less than Q^2/2K^2
@@ -41,6 +43,17 @@ func NewPIR(params Params) *pir {
 	var pir pir
 
 	pir.params = params
+	if pir.Hints == nil {
+		pir.Hints = make(map[int]struct{})
+	}
+	for i := 0; i < int(params.H); i++ {
+		switch params.M {
+		case 2:
+			pir.Hints[utils.RowColToSingleIndex(int(params.Q), i, i)] = struct{}{}
+		case 3:
+			pir.Hints[utils.RowColToSingleIndex3D(int(params.Q), i, i, i)] = struct{}{}
+		}
+	}
 
 	juliaPath, err1 := findJuliaPath()
 	if err1 != nil {
@@ -140,7 +153,7 @@ func (p *pir) GenFromConfig(filename string) {
 func (p *pir) Encode(input, output string) Matrix {
 	inter := "../output/inter.csv"
 
-	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M))
+	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M), int(p.params.H))
 	p.permuteAndEncryptMatrix(rmc)
 
 	switch m := rmc.(type) {
@@ -155,9 +168,9 @@ func (p *pir) Encode(input, output string) Matrix {
 
 func (p *pir) Query(i int, url string) (int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
-	query, points := p.prepareQuerySequence(points)
+	query := p.PrepareQuerySequence(points)
 	response := p.queryServer(query, url)
-	return response, points
+	return response, query
 }
 
 func (p *pir) QueryLocal(i int, filename string) (int, []int) {
@@ -168,22 +181,21 @@ func (p *pir) QueryLocal(i int, filename string) (int, []int) {
 	switch p.params.M {
 	case 2:
 		points = utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
-		query, points = p.prepareQuerySequence(points)
+		query = p.PrepareQuerySequence(points)
 		response = p.queryLocalDB(query, filename)
 	case 3:
 		points = utils.GenerateCurvePoints3D(int(p.params.K), int(p.params.Q), int(i))
-		query, points = p.prepareQuerySequence(points)
+		query = p.PrepareQuerySequence(points)
 		response = p.queryLocalDB3D(query, filename)
 	}
 
-	return response, points
+	return response, query
 }
 
-func (pir *pir) Decode(sum int, points []int) int {
+func (pir *pir) Decode(sum int, query []int) int {
 	dec_sum := 0
 	q := int(pir.params.Q)
-	for _, point := range points {
-		po, _ := pir.permutator.Permute(uint64(point))
+	for _, po := range query {
 		dec_sum += pir.encryptor.EncryptPosition(int(po))
 		dec_sum %= q
 	}
@@ -208,8 +220,8 @@ func findJuliaPath() (string, error) {
 	return path, nil
 }
 
-func (pir *pir) RMEncoding(input, output string, q, k, m int) Matrix {
-	juliaArgs := fmt.Sprintf("%s %s %d %d %d\n", input, output, q, k, m)
+func (pir *pir) RMEncoding(input, output string, q, k, m, h int) Matrix {
+	juliaArgs := fmt.Sprintf("%s %s %d %d %d %d\n", input, output, q, k, m, h)
 	_, err := pir.juliaCmdIn.Write([]byte(juliaArgs))
 	if err != nil {
 		fmt.Println("Error writing to Julia:", err)
@@ -271,18 +283,27 @@ func (pir *pir) permuteAndEncryptMatrix(rmc Matrix) {
 
 }
 
-func (pir *pir) prepareQuerySequence(points []int) ([]int, []int) {
+func (pir *pir) PrepareQuerySequence(points []int) []int {
 	var query []int
-	dec_sum := 0
-	q := int(pir.params.Q)
-	for _, point := range points {
+	for j, point := range points {
+		if _, exist := pir.Hints[point]; exist {
+			randomIndex := rand.Intn(int(pir.params.M))
+			i := 0
+			for key := range pir.Hints {
+				if i == randomIndex {
+					point = key
+					points[j] = point
+					break
+				}
+				i++
+			}
+		}
+
 		po, _ := pir.permutator.Permute(uint64(point))
 		query = append(query, int(po))
-		dec_sum += pir.encryptor.EncryptPosition(int(po))
-		dec_sum %= q
 	}
 
-	return query, points
+	return query
 }
 
 func (pir *pir) queryServer(list []int, url string) int {

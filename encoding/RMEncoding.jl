@@ -6,21 +6,42 @@ include("FastEvaluationOnPrimeField.jl")
 #    - message: A list of integers in [0,...,q-1]
 #    - q: Finite Field Size
 #    - d: Total Degree of the Polynomial for Reed-Muller Code
+#    - m: Dimension of the RM code, only support value 2 now.
+#    - h: Last h values of the message are planted as 0's
 # Output:
-#    - A RM(2, d) Code
+#    - A RM(m, d) Code
 ################################################################################
-function RMEncoding(message, q, d, m)
+function RMEncoding(message, q, d, m, h)
     Fq = finite_field(q, 1, "x")[1]
     R, x = polynomial_ring(Fq, "x")
 
+    some_function("I am Inside of encoding function")
+
     matt = zeros(Int64, q, q)
     index = 1
+
+    # Planted 0's at the diagonal
+    diagonal = 0
+    n = length(message)
+    for k = 1: min((d+1)÷2, h)
+        pos = diagonal + k
+        if (pos > n+1-k) 
+            break
+        end
+        value = message[pos]
+        message[pos] = message[n+1-k]
+        message[n+1-k] = value
+        diagonal += d + 2 - k
+    end
 
     # Put the message on the upper-left triange, which means the matt[i][j] where i+j <= d+2
     for i = 1:d+1
         matt[1:d+2-i, i] = message[index: index + d+1-i]
         index += d+2-i
     end
+
+    some_function(matt)
+
 
     # View Bi-variate polynomial P as
     #         P = f_0 * x^0 + f_1 * x +...+ f_d * x^d
@@ -92,9 +113,9 @@ function simpleTest(rmc, q)
     @assert sum([rmc[i,i] for i in 1:q]) % q == 0
 end
 
-function RME(message::Vector{Int}, d::Int, q::Int, m::Int)
+function RME(message::Vector{Int}, d::Int, q::Int, m::Int, h::Int)
     @assert binomial(d+m, m) == length(message)
-    rmc = RMEncoding(message, q, d, m)
+    rmc = RMEncoding(message, q, d, m, h)
     systematic_test(message, rmc, d)
     simpleTest(rmc, q)
     return rmc

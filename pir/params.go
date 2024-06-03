@@ -10,6 +10,7 @@ type Params struct {
 	Q uint64
 	K uint8
 	M uint8
+	H uint8
 }
 
 type Keys struct {
