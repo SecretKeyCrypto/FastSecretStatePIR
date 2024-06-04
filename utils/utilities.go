@@ -1,6 +1,8 @@
 package utils
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+)
 
 func GenerateRandomKey(length int) ([]byte, error) {
 	key := make([]byte, length)

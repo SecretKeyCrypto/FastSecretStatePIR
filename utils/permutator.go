@@ -47,10 +47,7 @@ type cbcMode interface {
 
 func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
 	radix, maxLen, _ := findBestRadixAndLength(maxNum)
-	// 	return NewPermutatorWithParameters(numRange, maxLen, radix, key, tweak)
-	// }
 
-	// func NewPermutatorWithParameters(maxNum, maxLen, radix int, key, tweak []byte) (Permutator, error) {
 	var newPermutator Permutator
 
 	if len(tweak) > maxLen {
@@ -224,7 +221,7 @@ func (p Permutator) Decrypt(X uint64) uint64 {
 	numA = X / p.numModV
 	numB = X % p.numModV
 
-	// Main Feistel Round, 10 times
+	// Main Feistel Round
 	for i := numRounds - 1; i >= 0; i-- {
 		Q[t+p.numPad] = byte(i)
 		binary.BigEndian.PutUint64(numUint64Bytes, numA)

@@ -13,7 +13,7 @@ import (
 func BenchmarkEncode(b *testing.B) {
 	q := 31
 	k := 4
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2), H: uint8(4)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
 
 	pir.Gen()
 	input := "../input/db.csv"
@@ -39,7 +39,7 @@ func BenchmarkGenerateQuery(b *testing.B) {
 	q := 127321
 	k := 4
 	m := 2
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m), H: uint8(q)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	pir.Gen()
 
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -62,7 +62,7 @@ func BenchmarkGenerate3DQuery(b *testing.B) {
 	q := 7919
 	k := 5
 	m := 3
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m), H: uint8(q)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	pir.Gen()
 
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -85,7 +85,7 @@ func BenchmarkDecoding3DQuery(b *testing.B) {
 	q := 7919
 	k := 5
 	m := 3
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m), H: uint8(q)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	pir.Gen()
 
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -109,7 +109,7 @@ func BenchmarkGenerate4DQuery(b *testing.B) {
 	q := 1489
 	k := 4
 	m := 4
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2), H: uint8(q)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
 	pir.Gen()
 
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -131,7 +131,7 @@ func BenchmarkGenerate4DQuery(b *testing.B) {
 func TestEndToEnd(b *testing.T) {
 	q := 31
 	k := 2
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2), H: uint8(2)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
 	pir.Gen()
 	input := "../input/db.csv"
 	output := "../output/matrix.csv"
@@ -153,7 +153,7 @@ func TestEndToEnd(b *testing.T) {
 func TestEndToEndFromConfigKey(b *testing.T) {
 	q := 31
 	k := 2
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2), H: uint8(2)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
 	pir.GenFromConfig("../config.json")
 	input := "../input/example_db.csv"
 	output := "../output/example_matrix.csv"
@@ -176,7 +176,7 @@ func TestQueryFromServer(b *testing.T) {
 	q := 31
 	k := 2
 	m := 2
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m), H: uint8(4)})
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	configFilename := "../config.json"
 	pir.GenFromConfig(configFilename)
 

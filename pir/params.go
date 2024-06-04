@@ -6,11 +6,15 @@ import (
 	"rme/utils"
 )
 
+/*
+Q: Field Size
+K: Degree of the curve
+M: Dimension of RM code
+*/
 type Params struct {
 	Q uint64
 	K uint8
 	M uint8
-	H uint8
 }
 
 type Keys struct {

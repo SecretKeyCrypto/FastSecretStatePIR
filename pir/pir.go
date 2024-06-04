@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
 	"net/http"
 	"os/exec"
 	"rme/utils"
@@ -35,7 +34,6 @@ type pir struct {
 	juliaCmd    *exec.Cmd
 	juliaCmdIn  io.WriteCloser
 	juliaCmdOut io.ReadCloser
-	Hints       map[int]struct{}
 }
 
 // This works for any database size less than Q^2/2K^2
@@ -43,17 +41,6 @@ func NewPIR(params Params) *pir {
 	var pir pir
 
 	pir.params = params
-	if pir.Hints == nil {
-		pir.Hints = make(map[int]struct{})
-	}
-	for i := 0; i < int(params.H); i++ {
-		switch params.M {
-		case 2:
-			pir.Hints[utils.RowColToSingleIndex(int(params.Q), i, i)] = struct{}{}
-		case 3:
-			pir.Hints[utils.RowColToSingleIndex3D(int(params.Q), i, i, i)] = struct{}{}
-		}
-	}
 
 	juliaPath, err1 := findJuliaPath()
 	if err1 != nil {
@@ -145,7 +132,6 @@ func (p *pir) GenFromConfig(filename string) {
 		fmt.Println("Error Creating Encryptor:", err)
 		panic(err)
 	}
-
 	p.permutator = &permutator
 	p.encryptor = &encryptor
 }
@@ -153,7 +139,7 @@ func (p *pir) GenFromConfig(filename string) {
 func (p *pir) Encode(input, output string) Matrix {
 	inter := "../output/inter.csv"
 
-	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M), int(p.params.H))
+	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M))
 	p.permuteAndEncryptMatrix(rmc)
 
 	switch m := rmc.(type) {
@@ -220,8 +206,8 @@ func findJuliaPath() (string, error) {
 	return path, nil
 }
 
-func (pir *pir) RMEncoding(input, output string, q, k, m, h int) Matrix {
-	juliaArgs := fmt.Sprintf("%s %s %d %d %d %d\n", input, output, q, k, m, h)
+func (pir *pir) RMEncoding(input, output string, q, k, m int) Matrix {
+	juliaArgs := fmt.Sprintf("%s %s %d %d %d\n", input, output, q, k, m)
 	_, err := pir.juliaCmdIn.Write([]byte(juliaArgs))
 	if err != nil {
 		fmt.Println("Error writing to Julia:", err)
@@ -285,19 +271,7 @@ func (pir *pir) permuteAndEncryptMatrix(rmc Matrix) {
 
 func (pir *pir) PrepareQuerySequence(points []int) []int {
 	var query []int
-	for j, point := range points {
-		if _, exist := pir.Hints[point]; exist {
-			randomIndex := rand.Intn(int(pir.params.M))
-			i := 0
-			for key := range pir.Hints {
-				if i == randomIndex {
-					point = key
-					points[j] = point
-					break
-				}
-				i++
-			}
-		}
+	for _, point := range points {
 
 		po, _ := pir.permutator.Permute(uint64(point))
 		query = append(query, int(po))
