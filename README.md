@@ -1,65 +1,70 @@
 # FastSecretStatePIR
-This library provides an implentation of a Private Information Retrieval Protocol based on Permuted Reed Muller Encoding.
+This repository provides an implementation of a Secret Key Private Information Retrieval (PIR) scheme using Permuted Reed Muller Code. It is designed to handle messages where each element does not exceed the prime `q`. The library includes functionalities for:
 
-# Configuration
-The implementation supports reading parameters from the config file which contains the json structure as follows. 
-```
-type Config struct {
-	EncyrptorKey    string `json:"encryptorKey"`
-	PermutatorKey   string `json:"permutatorKey"`
-	PermutatorTweak string `json:"permutatorTweak"`
-	ServerUrl       string `json:"serverUrl"`
+- **Gen**: Generates a secret key necessary for the PIR protocol.
+- **Encode**: Encodes messages using a predefined-size Reed Muller Code with a secret permutation. The encoded data is transmitted to the server.
+- **Query**: Generates queries for specific indexes in the Reed Muller code space, creating curves essential for decoding targeted points. These queries are sent to the server, which then executes lookups and sums the queried entries.
+- **Decode**: Decodes the server's response using the secret key.
+
+## Software Requirements
+- **Julia 1.10.3**: Dependencies are specified in `encoding/Manifest.toml`.
+- **Go 1.22.3**
+
+## Configuration
+Configuration parameters are specified in a JSON-structured config file in `config.json`:
+
+```json
+{
+  "EncryptorKey": "value",
+  "PermutatorKey": "value",
+  "PermutatorTweak": "value",
+  "ServerUrl": "value"
 }
 ```
 
-# Testing
-To run end-to-end integration test
-1. go test -run TestEndToEnd
-2. go test -run TestEndToEndFromConfigKey
-3. go test -run TestQueryFromServer
+## Testing
+Run integration tests and benchmarks using the following commands:
 
-To run benchmarks regarding to the query process 
-1. go test -bench BenchmarkEncode
-2. go test -bench BenchmarkGenerateQuery
-3. go test -bench BenchmarkGenerate3DQuery
-4. go test -bench BenchmarkGenerate4DQuery
-5. go test -bench BenchmarkDecodingLargeRecorddQuery
-6. go test -bench BenchmarkDecoding3DQuery
-7. go test -bench BenchmarkClientComputation
-
-# Example Usage
-Copy the following code into a file called main.go, and run it with `go run main.go`
-
-## Encoding
+### Integration Tests
+```bash
+go test -run TestEndToEnd
+go test -run TestEndToEndFromConfigKey
+go test -run TestQueryFromServer
 ```
+
+### Benchmarks
+```bash
+go test -bench BenchmarkEncode
+go test -bench BenchmarkGenerateQuery
+go test -bench BenchmarkGenerate3DQuery
+go test -bench BenchmarkGenerate4DQuery
+go test -bench BenchmarkDecodingLargeRecorddQuery
+go test -bench BenchmarkDecoding3DQuery
+go test -bench BenchmarkClientComputation
+```
+
+## Example Usage
+Below is an example to encode and decode using this library. Assume `main.go` is set up as follows:
+
+### Encoding
+```go
 package main
 
-import (
-    "fmt"
-)
+import "fmt"
 
 func main() {
-    q := 31
-	k := 2
-	m := 2
+    q, k, m := 31, 2, 2
+    p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
+    configFilename := "../config.json"
+    pir.GenFromConfig(configFilename)
 
-	p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
-	configFilename := "../config.json"
-	pir.GenFromConfig(configFilename)
-
-	input := "../input/example_db.csv"
-	output := "../output/matrix.csv"
-
-	pir.Encode(input, output)
+    input, output := "../input/example_db.csv", "../output/matrix.csv"
+    pir.Encode(input, output)
 }
 ```
 
-After sending the output file onto server where it can read the matrix and output the sumation of queried points.
-
-The request from the clients will be a HTTP request contains a list of positions in the RM codeword space.
-
-## Decoding
-```
+### Decoding
+```go
 package main
 
 import (
@@ -68,25 +73,20 @@ import (
 )
 
 func main() {
-    q := 31
-	k := 2
-	m := 2
-
-	p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
-
-	configFilename := "../config.json"
-	pir.GenFromConfig(configFilename)
-
+    q, k, m := 31, 2, 2
+    p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
+    configFilename := "../config.json"
+    pir.GenFromConfig(configFilename)
 
     target_position := 28
-	sum, points := pir.Query(target, utils.GetParameterConfig(configFilename).ServerUrl)
-	target_value := pir.Decode(sum, points)
+    sum, points := pir.Query(target_position, utils.GetParameterConfig(configFilename).ServerUrl)
+    target_value := pir.Decode(sum, points)
     fmt.Println("Output target value: ", target_value)
 
-	// We also support query from local database for sanity check
-	for i := 0; i < int(math.Pow(float64(q), float64(m))); i++ {
-		sum, points := p.QueryLocal(i, output)
-		dec := p.Decode(sum, points)
-	}
+    // Additional local database query for sanity check
+    for i := 0; i < int(math.Pow(float64(q), float64(m))); i++ {
+        sum, points := p.QueryLocal(i, output)
+        dec := p.Decode(sum, points)
+    }
 }
 ```
