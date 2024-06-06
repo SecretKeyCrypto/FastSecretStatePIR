@@ -21,6 +21,11 @@ To run end-to-end integration test
 To run benchmarks regarding to the query process 
 1. go test -bench BenchmarkEncode
 2. go test -bench BenchmarkGenerateQuery
+3. go test -bench BenchmarkGenerate3DQuery
+4. go test -bench BenchmarkGenerate4DQuery
+5. go test -bench BenchmarkDecodingLargeRecorddQuery
+6. go test -bench BenchmarkDecoding3DQuery
+7. go test -bench BenchmarkClientComputation
 
 # Example Usage
 Copy the following code into a file called main.go, and run it with `go run main.go`
@@ -31,13 +36,14 @@ package main
 
 import (
     "fmt"
-    "https://github.com/Caicai-Chen/FastSecretStatePIR"
 )
 
 func main() {
     q := 31
-	d := 2
-	pir := NewPIR(Params{uint64(q), uint8(d)})
+	k := 2
+	m := 2
+
+	p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	configFilename := "../config.json"
 	pir.GenFromConfig(configFilename)
 
@@ -48,7 +54,7 @@ func main() {
 }
 ```
 
-Then Copy the output file onto server where it can read the matrix and output the sumation of queried points.
+After sending the output file onto server where it can read the matrix and output the sumation of queried points.
 
 The request from the clients will be a HTTP request contains a list of positions in the RM codeword space.
 
@@ -63,8 +69,11 @@ import (
 
 func main() {
     q := 31
-	d := 2
-	pir := NewPIR(Params{uint64(q), uint8(d)})
+	k := 2
+	m := 2
+
+	p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
+
 	configFilename := "../config.json"
 	pir.GenFromConfig(configFilename)
 
@@ -73,5 +82,11 @@ func main() {
 	sum, points := pir.Query(target, utils.GetParameterConfig(configFilename).ServerUrl)
 	target_value := pir.Decode(sum, points)
     fmt.Println("Output target value: ", target_value)
+
+	// We also support query from local database for sanity check
+	for i := 0; i < int(math.Pow(float64(q), float64(m))); i++ {
+		sum, points := p.QueryLocal(i, output)
+		dec := p.Decode(sum, points)
+	}
 }
 ```
