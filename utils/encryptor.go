@@ -33,20 +33,23 @@ func NewEncryptor(key []byte, q int) (Encryptor, error) {
 	return encryptor, nil
 }
 
-func generatePlaintextFromIndex(index int, plaintext []byte) []byte {
+func generatePlaintextFromIndex(slice, index int, plaintext []byte) []byte {
 	binary.LittleEndian.PutUint64(plaintext[0:8], uint64(index))
-	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(0))
+	binary.LittleEndian.PutUint64(plaintext[8:16], uint64(slice))
 	return plaintext
 }
 
 // encryptBlock encrypts a single block of plaintext using AES in ECB mode.
 func (e Encryptor) Encrypt(index, data int) int {
-
-	return (e.EncryptPosition(index) + (data)) % int(e.q)
+	return (e.EncryptPosition(0, index) + (data)) % int(e.q)
 }
 
-func (e Encryptor) EncryptPosition(index int) int {
-	generatePlaintextFromIndex(index, e.plaintext)
+func (e Encryptor) EncryptSlice(slice, index, data int) int {
+	return (e.EncryptPosition(slice, index) + (data)) % int(e.q)
+}
+
+func (e Encryptor) EncryptPosition(slice, index int) int {
+	generatePlaintextFromIndex(slice, index, e.plaintext)
 
 	e.cipher.Encrypt(e.ciphertext, e.plaintext)
 
@@ -63,5 +66,9 @@ func (e Encryptor) EncryptPosition(index int) int {
 }
 
 func (e Encryptor) Decrypt(index, data int) int {
-	return (-e.EncryptPosition(index) + (data) + int(e.q)) % int(e.q)
+	return (-e.EncryptPosition(0, index) + (data) + int(e.q)) % int(e.q)
+}
+
+func (e Encryptor) DecryptSlice(slice, index, data int) int {
+	return (-e.EncryptPosition(slice, index) + (data) + int(e.q)) % int(e.q)
 }

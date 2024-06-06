@@ -182,11 +182,26 @@ func (pir *pir) Decode(sum int, query []int) int {
 	dec_sum := 0
 	q := int(pir.params.Q)
 	for _, po := range query {
-		dec_sum += pir.encryptor.EncryptPosition(int(po))
+		dec_sum += pir.encryptor.EncryptPosition(0, int(po))
 		dec_sum %= q
 	}
 
 	return (dec_sum - sum + q) % q
+}
+
+func (pir *pir) DecodeLargeRecord(sum []int, query []int) []int {
+	dec_sum := 0
+	q := int(pir.params.Q)
+	for i, po := range query {
+		dec_sum += pir.encryptor.EncryptPosition(i, int(po))
+		dec_sum %= q
+	}
+
+	for i := range sum {
+		sum[i] = (dec_sum - sum[i] + q) % q
+	}
+
+	return sum
 }
 
 func findJuliaPath() (string, error) {

@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// *************************************************************************************
+//
+//	Encoding Benchmark
+//
+// *************************************************************************************
 func BenchmarkEncode(b *testing.B) {
 	q := 31
 	k := 4
@@ -35,8 +40,13 @@ func BenchmarkEncode(b *testing.B) {
 	fmt.Printf("Average time per operation: %v\n", totalDuration/time.Duration(b.N))
 }
 
+// *************************************************************************************
+//
+//	Query Generation Benchmark
+//
+// *************************************************************************************
 func BenchmarkGenerateQuery(b *testing.B) {
-	q := 127321
+	q := 11587
 	k := 4
 	m := 2
 	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
@@ -59,8 +69,8 @@ func BenchmarkGenerateQuery(b *testing.B) {
 }
 
 func BenchmarkGenerate3DQuery(b *testing.B) {
-	q := 7919
-	k := 5
+	q := 3691
+	k := 4
 	m := 3
 	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	pir.Gen()
@@ -79,6 +89,63 @@ func BenchmarkGenerate3DQuery(b *testing.B) {
 
 	b.StopTimer()
 	fmt.Printf("Average time per generate 3D query: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
+}
+
+func BenchmarkGenerate4DQuery(b *testing.B) {
+	q := 797
+	k := 4
+	m := 4
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
+	pir.Gen()
+
+	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var totalDuration time.Duration
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		target := rand.Intn(int(math.Pow(float64(q), float64(m))))
+		start := time.Now()
+		points := utils.GenerateCurvePoints4D(k, q, target)
+		pir.PrepareQuerySequence(points)
+		totalDuration += time.Since(start)
+	}
+
+	b.StopTimer()
+	fmt.Printf("Average time per generate 4D query: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
+}
+
+// *************************************************************************************
+//
+//	Decoding Benchmark
+//
+// *************************************************************************************
+func BenchmarkDecodingLargeRecorddQuery(b *testing.B) {
+	q := 4093
+	k := 3
+	m := 2
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
+	pir.Gen()
+
+	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	var totalDuration time.Duration
+	// Record size 100KB and devide to each slice 12 bit
+	mockResponse := make([]int, int(100*math.Pow(2, 10)/1.5))
+	for i := range mockResponse {
+		mockResponse[i] = rand.Intn(q)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		target := rand.Intn(int(math.Pow(float64(q), float64(m))))
+		start := time.Now()
+		points := utils.GenerateCurvePoints(k, q, target)
+		query := pir.PrepareQuerySequence(points)
+		pir.DecodeLargeRecord(mockResponse, query)
+		totalDuration += time.Since(start)
+	}
+
+	b.StopTimer()
+	fmt.Printf("Average time per Decoding 100KB query: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
 }
 
 func BenchmarkDecoding3DQuery(b *testing.B) {
@@ -105,11 +172,16 @@ func BenchmarkDecoding3DQuery(b *testing.B) {
 	fmt.Printf("Average time per Decoding 3D query: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
 }
 
-func BenchmarkGenerate4DQuery(b *testing.B) {
-	q := 1489
-	k := 4
-	m := 4
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
+// *************************************************************************************
+//
+//	Client Computation Benchmark
+//
+// *************************************************************************************
+func BenchmarkClientComputation(b *testing.B) {
+	q := 7919
+	k := 5
+	m := 3
+	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
 	pir.Gen()
 
 	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -117,17 +189,23 @@ func BenchmarkGenerate4DQuery(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		target := rand.Intn(int(math.Pow(float64(q), float64(m))))
+		target := rand.Intn(q * q)
 		start := time.Now()
-		points := utils.GenerateCurvePoints4D(k, q, target)
-		pir.PrepareQuerySequence(points)
+		points := utils.GenerateCurvePoints3D(k, q, target)
+		query := pir.PrepareQuerySequence(points)
+		pir.Decode(0, query)
 		totalDuration += time.Since(start)
 	}
 
 	b.StopTimer()
-	fmt.Printf("Average time per generate 4D query: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
+	fmt.Printf("Average time per client computation: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
 }
 
+// *************************************************************************************
+//
+//	Functional  Test
+//
+// *************************************************************************************
 func TestEndToEnd(b *testing.T) {
 	q := 31
 	k := 2
