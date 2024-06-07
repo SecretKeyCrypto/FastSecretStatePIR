@@ -1,4 +1,4 @@
-# FastSecretStatePIR
+# Fast Secret-Key PIR
 This repository provides an implementation of a Secret Key Private Information Retrieval (PIR) scheme using Permuted Reed Muller Code. It is designed to handle messages where each element does not exceed the prime `q`. The library includes functionalities for:
 
 - **Gen**: Generates a secret key necessary for the PIR protocol.
