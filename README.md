@@ -76,11 +76,13 @@ func main() {
     q, k, m := 31, 2, 2
     p := pir.NewPIR(pir.Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
     configFilename := "../config.json"
-    pir.GenFromConfig(configFilename)
+    output := "../output/matrix.csv"
+
+    p.GenFromConfig(configFilename)
 
     target_position := 28
-    sum, points := pir.Query(target_position, utils.GetParameterConfig(configFilename).ServerUrl)
-    target_value := pir.Decode(sum, points)
+    sum, points := p.Query(target_position, utils.GetParameterConfig(configFilename).ServerUrl)
+    target_value := p.Decode(sum, points)
     fmt.Println("Output target value: ", target_value)
 
     // Additional local database query for sanity check

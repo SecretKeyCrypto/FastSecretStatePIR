@@ -140,7 +140,7 @@ func BenchmarkDecodingLargeRecorddQuery(b *testing.B) {
 		start := time.Now()
 		points := utils.GenerateCurvePoints(k, q, target)
 		query := pir.PrepareQuerySequence(points)
-		pir.DecodeLargeRecord(mockResponse, query)
+		pir.Decode(mockResponse, query)
 		totalDuration += time.Since(start)
 	}
 
@@ -164,7 +164,7 @@ func BenchmarkDecoding3DQuery(b *testing.B) {
 		points := utils.GenerateCurvePoints3D(k, q, target)
 		query := pir.PrepareQuerySequence(points)
 		start := time.Now()
-		pir.Decode(q-1, query)
+		pir.Decode([]int{q - 1}, query)
 		totalDuration += time.Since(start)
 	}
 
@@ -193,7 +193,7 @@ func BenchmarkClientComputation(b *testing.B) {
 		start := time.Now()
 		points := utils.GenerateCurvePoints3D(k, q, target)
 		query := pir.PrepareQuerySequence(points)
-		pir.Decode(0, query)
+		pir.Decode([]int{q - 1}, query)
 		totalDuration += time.Since(start)
 	}
 
@@ -219,10 +219,10 @@ func TestEndToEnd(b *testing.T) {
 	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
 
 	for i := 0; i < q*q; i++ {
-		sum, query := pir.QueryLocal(i, output)
+		sum, query := pir.QueryLocal(i, []string{output})
 		dec := pir.Decode(sum, query)
 		row, col := utils.SingleIndexToRowCol(q, i)
-		if ori[row][col] != dec {
+		if ori[row][col] != dec[0] {
 			panic("Decoding ERROR")
 		}
 	}
@@ -241,10 +241,10 @@ func TestEndToEndFromConfigKey(b *testing.T) {
 	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
 
 	for i := 0; i < q*q; i++ {
-		sum, query := pir.QueryLocal(i, output)
+		sum, query := pir.QueryLocal(i, []string{output})
 		dec := pir.Decode(sum, query)
 		row, col := utils.SingleIndexToRowCol(q, i)
-		if ori[row][col] != dec {
+		if ori[row][col] != dec[0] {
 			panic("Decoding ERROR")
 		}
 	}

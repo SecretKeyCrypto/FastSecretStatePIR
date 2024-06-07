@@ -24,7 +24,7 @@ const (
 )
 
 type Response struct {
-	Sum int `json:"sum"`
+	Sums []int `json:"sums"`
 }
 
 type pir struct {
@@ -139,8 +139,9 @@ func (p *pir) GenFromConfig(filename string) {
 func (p *pir) Encode(input, output string) Matrix {
 	inter := "../output/inter.csv"
 
+	// TODO: Update to support sliced encoding and pass the slice id to Encrypt function.
 	rmc := p.RMEncoding(input, inter, int(p.params.Q), int(p.params.K), int(p.params.M))
-	p.permuteAndEncryptMatrix(rmc)
+	p.permuteAndEncryptMatrix(0, rmc)
 
 	switch m := rmc.(type) {
 	case *Matrix2D:
@@ -152,56 +153,54 @@ func (p *pir) Encode(input, output string) Matrix {
 	return rmc
 }
 
-func (p *pir) Query(i int, url string) (int, []int) {
+func (p *pir) Query(i int, url string) ([]int, []int) {
 	points := utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
 	query := p.PrepareQuerySequence(points)
 	response := p.queryServer(query, url)
 	return response, query
 }
 
-func (p *pir) QueryLocal(i int, filename string) (int, []int) {
+func (p *pir) QueryLocal(i int, filenames []string) ([]int, []int) {
 	var points []int
 	var query []int
-	var response int
+	var response []int
 
 	switch p.params.M {
 	case 2:
-		points = utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
-		query = p.PrepareQuerySequence(points)
-		response = p.queryLocalDB(query, filename)
+		for _, filename := range filenames {
+			points = utils.GenerateCurvePoints(int(p.params.K), int(p.params.Q), int(i))
+			query = p.PrepareQuerySequence(points)
+			response = append(response, p.queryLocalDB(query, filename))
+		}
 	case 3:
-		points = utils.GenerateCurvePoints3D(int(p.params.K), int(p.params.Q), int(i))
-		query = p.PrepareQuerySequence(points)
-		response = p.queryLocalDB3D(query, filename)
+		for _, filename := range filenames {
+			points = utils.GenerateCurvePoints3D(int(p.params.K), int(p.params.Q), int(i))
+			query = p.PrepareQuerySequence(points)
+			response = append(response, p.queryLocalDB3D(query, filename))
+		}
 	}
 
 	return response, query
 }
 
-func (pir *pir) Decode(sum int, query []int) int {
-	dec_sum := 0
+func (pir *pir) Decode(sums []int, query []int) []int {
 	q := int(pir.params.Q)
-	for _, po := range query {
-		dec_sum += pir.encryptor.EncryptPosition(0, int(po))
-		dec_sum %= q
+	results := make([]int, len(sums)) // Create a list to store the results
+
+	for i, sum := range sums {
+		dec_sum := 0
+
+		// Perform the same process for each sum in the list
+		for _, po := range query {
+			dec_sum += pir.encryptor.EncryptPosition(i, int(po))
+			dec_sum %= q
+		}
+
+		// Perform the final decoding step for each sum
+		results[i] = (dec_sum - sum + q) % q
 	}
 
-	return (dec_sum - sum + q) % q
-}
-
-func (pir *pir) DecodeLargeRecord(sum []int, query []int) []int {
-	dec_sum := 0
-	q := int(pir.params.Q)
-	for i, po := range query {
-		dec_sum += pir.encryptor.EncryptPosition(i, int(po))
-		dec_sum %= q
-	}
-
-	for i := range sum {
-		sum[i] = (dec_sum - sum[i] + q) % q
-	}
-
-	return sum
+	return results
 }
 
 func findJuliaPath() (string, error) {
@@ -249,7 +248,7 @@ func (pir *pir) RMEncoding(input, output string, q, k, m int) Matrix {
 	}
 }
 
-func (pir *pir) permuteAndEncryptMatrix(rmc Matrix) {
+func (pir *pir) permuteAndEncryptMatrix(slice int, rmc Matrix) {
 	var ciphertextInt64 uint64
 	var new_data int
 
@@ -274,7 +273,7 @@ func (pir *pir) permuteAndEncryptMatrix(rmc Matrix) {
 		} else {
 			new_data = rmc.GetByIndex(new_index)
 
-			rmc.SetByIndex(new_index, pir.encryptor.Encrypt(new_index, data))
+			rmc.SetByIndex(new_index, pir.encryptor.EncryptSlice(slice, new_index, data))
 
 			data = new_data
 			index = new_index
@@ -295,7 +294,7 @@ func (pir *pir) PrepareQuerySequence(points []int) []int {
 	return query
 }
 
-func (pir *pir) queryServer(list []int, url string) int {
+func (pir *pir) queryServer(list []int, url string) []int {
 	jsonData, _ := json.Marshal(list)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
@@ -321,7 +320,7 @@ func (pir *pir) queryServer(list []int, url string) int {
 
 	json.Unmarshal([]byte(body), &respData)
 
-	return respData.Sum
+	return respData.Sums
 }
 
 func (p *pir) queryLocalDB(list []int, filename string) int {
