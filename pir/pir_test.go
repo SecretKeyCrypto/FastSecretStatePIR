@@ -201,6 +201,32 @@ func BenchmarkClientComputation(b *testing.B) {
 	fmt.Printf("Average time per client computation: %v, with b.N value: %d \n", totalDuration/time.Duration(b.N), b.N)
 }
 
+func BenchmarkCodewordPermutation(b *testing.B) {
+	q := 2039
+	k := 2
+	m := 2
+	p := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
+	p.Gen()
+	rmc := make([][]int, q)
+	for i := 0; i < q; i++ {
+		rmc[i] = make([]int, q)
+		for j := 0; j < q; j++ {
+			rmc[i][j] = rand.Intn(q) // Random integer from 0 to q-1
+		}
+	}
+	var totalDuration time.Duration
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		p.permuteAndEncryptMatrix(0, &Matrix2D{data: rmc, q: q})
+		totalDuration += time.Since(start)
+	}
+
+	b.StopTimer()
+	fmt.Printf("Average time for permutate Reed Muller Code of size %d : %v, with b.N value: %d \n", q*q, totalDuration/time.Duration(b.N), b.N)
+}
+
 // *************************************************************************************
 //
 //	Functional  Test

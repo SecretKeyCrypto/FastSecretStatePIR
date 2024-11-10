@@ -249,38 +249,42 @@ func (pir *pir) RMEncoding(input, output string, q, k, m int) Matrix {
 }
 
 func (pir *pir) permuteAndEncryptMatrix(slice int, rmc Matrix) {
-	var ciphertextInt64 uint64
-	var new_data int
+	// Size of the matrix (number of elements)
+	size := rmc.Size()
+	visited := make([]bool, size) // Track visited positions
+	index := 0                    // Start index
 
-	visited := make([]bool, rmc.Size())
+	for index < size {
+		// If already visited, move to the next unvisited index
+		if visited[index] {
+			index++
+			continue
+		}
 
-	data := rmc.GetByIndex(0)
+		// Start a new cycle with the current data
+		start := index
+		data := rmc.GetByIndex(start)
+		for !visited[start] {
+			visited[start] = true
 
-	index := 0
-	new_index := 0
+			// Permute the current index to get the new position
+			ciphertextInt64, _ := pir.permutator.Permute(uint64(start))
+			new_index := int(ciphertextInt64)
 
-	for {
-		ciphertextInt64, _ = pir.permutator.Permute(uint64(index))
-		new_index = int(ciphertextInt64)
+			// Fetch the data at the new position to continue the cycle
+			new_data := rmc.GetByIndex(new_index)
 
-		if visited[new_index] {
-			index += 1
-			if index == len(visited) {
-				break
-			}
-
-			data = rmc.GetByIndex(index)
-		} else {
-			new_data = rmc.GetByIndex(new_index)
-
+			// Encrypt and set data at the new position
 			rmc.SetByIndex(new_index, pir.encryptor.EncryptSlice(slice, new_index, data))
 
+			// Move to the next position in the cycle
 			data = new_data
-			index = new_index
-			visited[new_index] = true
+			start = new_index
 		}
-	}
 
+		// Advance index to find the next unvisited element if the cycle is complete
+		index++
+	}
 }
 
 func (pir *pir) PrepareQuerySequence(points []int) []int {
