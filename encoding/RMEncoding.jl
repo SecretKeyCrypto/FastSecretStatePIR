@@ -1,5 +1,6 @@
-using Polynomials, Nemo, AbstractAlgebra, CSV, DataFrames, Serialization, DelimitedFiles
+using Polynomials, Nemo, AbstractAlgebra, CSV, DataFrames, Serialization, DelimitedFiles, Base.Threads
 include("FastEvaluationOnPrimeField.jl")
+include("RME3D.jl")
 ################################################################################
 #                 Q-ary Systematic Reed-Muller Encoding RM(2, d)
 # Input:
@@ -11,7 +12,7 @@ include("FastEvaluationOnPrimeField.jl")
 # Output:
 #    - A RM(m, d) Code
 ################################################################################
-function RMEncoding(message, q, d, m)
+function RME2D(message, q, d)
     Fq = finite_field(q, 1, "x")[1]
     R, x = polynomial_ring(Fq, "x")
 
@@ -57,7 +58,7 @@ function RMEncoding(message, q, d, m)
     # Now in each col, the first q elements are evaluations of f_j on 0,...,q-1,
     # Then view each col as a univariate polynomial w.r.t. the second variable.
     # This evaluation coincide with the bi-variable polynomial evaluation.
-    for col in 1:q
+    Threads.@threads for col in 1:q
         matt[:, col] = [toInt(i) for i in uniVWithTree(R(matt[:, col]), q, modtree)]
     end
 
@@ -96,8 +97,13 @@ end
 
 function RME(message::Vector{Int}, d::Int, q::Int, m::Int)
     @assert binomial(d+m, m) == length(message)
-    rmc = RMEncoding(message, q, d, m)
-    systematic_test(message, rmc, d)
-    simpleTest(rmc, q)
-    return rmc
+    if m == 2
+        rmc = RME2D(message, q, d)
+        systematic_test(message, rmc, d)
+        simpleTest(rmc, q)
+        return rmc
+    elseif m == 3
+        rmc = RME3D(message, q, d)
+        return rmc
+    end
 end
