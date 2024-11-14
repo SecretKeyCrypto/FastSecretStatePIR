@@ -1,13 +1,14 @@
 # Fast Secret-Key PIR
-This repository provides an implementation of a Secret Key Private Information Retrieval (PIR) scheme using Permuted Reed Muller Code. It is designed to handle messages where each element does not exceed the prime `q`. The library includes functionalities for:
+
+This repository provides an efficient implementation of a Secret Key Private Information Retrieval (PIR) scheme using Permuted Reed Muller Code. PIR schemes allow clients to retrieve data from a server without revealing which data was retrieved. This implementation is designed to handle messages where each element does not exceed the prime `q`. The core functionalities include:
 
 - **Gen**: Generates a secret key necessary for the PIR protocol.
-- **Encode**: Encodes messages using a predefined-size Reed Muller Code with a secret permutation. The encoded data is transmitted to the server.
-- **Query**: Generates queries for specific indexes in the Reed Muller code space, creating curves essential for decoding targeted points. These queries are sent to the server, which then executes lookups and sums the queried entries.
-- **Decode**: Decodes the server's response using the secret key.
+- **Encode**: Encodes messages using a predefined Reed Muller Code with a secret permutation. This encoded data is then sent to the server.
+- **Query**: Generates queries for specific indexes within the Reed Muller code space, forming curves essential for decoding. These queries are sent to the server, which executes lookups and sums the queried entries.
+- **Decode**: Decodes the server’s response using the secret key.
 
 ## Software Requirements
-- **Julia 1.10.3**: Dependencies are specified in `encoding/Manifest.toml`.
+- **Julia 1.10.3**: Dependencies specified in `encoding/Manifest.toml`.
 - **Go 1.22.3**
 
 ## Configuration
@@ -20,10 +21,9 @@ Configuration parameters are specified in a JSON-structured config file in `conf
   "PermutatorTweak": "value",
   "ServerUrl": "value"
 }
-```
 
 ## Testing
-Run integration tests and benchmarks using the following commands:
+The library includes integration tests to verify functionality and benchmark tests to measure performance across different parameters. You can run the tests with the following commands:
 
 ### Integration Tests
 ```bash
@@ -41,6 +41,7 @@ go test -bench BenchmarkGenerate4DQuery
 go test -bench BenchmarkDecodingLargeRecorddQuery
 go test -bench BenchmarkDecoding3DQuery
 go test -bench BenchmarkClientComputation
+go test -bench BenchmarkCodewordPermutation
 ```
 
 ## Example Usage
@@ -92,3 +93,7 @@ func main() {
     }
 }
 ```
+
+In this example, the encoded data is sent to the server, which returns a sum that the client decodes to retrieve the target data without revealing the specific position and value. The additional query loop verifies the integrity of the decoding process across all positions.
+
+This implementation leverages Permuted Reed Muller Codes for efficiency and security in PIR. Benchmarks show that it performs effectively even with larger data, although complexity increases with the degree of Reed Muller codes and dimensionality.
