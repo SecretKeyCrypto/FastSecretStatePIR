@@ -1,6 +1,9 @@
 using Polynomials, Nemo, AbstractAlgebra, CSV, DataFrames, Serialization, DelimitedFiles, Base.Threads
 include("FastEvaluationOnPrimeField.jl")
 include("RME3D.jl")
+include("RME2DForFFTField.jl")
+include("FFT.jl")
+
 ################################################################################
 #                 Q-ary Systematic Reed-Muller Encoding RM(2, d)
 # Input:
@@ -13,6 +16,9 @@ include("RME3D.jl")
 #    - A RM(m, d) Code
 ################################################################################
 function RME2D(message, q, d)
+    if (is_power_of_2(q-1) && is_power_of_2(d+1))
+        return RME2DFFT(message, q, d)
+    end
     Fq = finite_field(q, 1, "x")[1]
     R, x = polynomial_ring(Fq, "x")
 
