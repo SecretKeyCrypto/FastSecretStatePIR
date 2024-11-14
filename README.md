@@ -21,6 +21,7 @@ Configuration parameters are specified in a JSON-structured config file in `conf
   "PermutatorTweak": "value",
   "ServerUrl": "value"
 }
+```
 
 ## Testing
 The library includes integration tests to verify functionality and benchmark tests to measure performance across different parameters. You can run the tests with the following commands:
