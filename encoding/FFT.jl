@@ -68,10 +68,9 @@ function prime_factors(n)
 end
 
 # Function to check if g is a primitive root
-function is_primitive_root(g, q)
+function is_primitive_root(F, g, q)
     # Find the factors of q - 1
     factors = prime_factors(q - 1)
-    F = GF(q)
     # Check if g^( (q-1)/p ) != 1 for each prime factor p of (q-1)
     for (p, _) in factors
         if g^((q - 1) ÷ p) == F(1)
@@ -84,7 +83,7 @@ end
 # Find a primitive root by testing random elements
 function find_primitive_root(F, q)
     for g in F
-        if g != F(0) && is_primitive_root(g, q)
+        if g != F(0) && is_primitive_root(F, g, q)
             return g
         end
     end

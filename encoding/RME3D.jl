@@ -97,7 +97,7 @@ function ParallelEvaluateCanonicalSet(monomials, d, q)
     return A
 end
 
-function RME3D(d, message, q)
+function RME3D(message, q, d)
     monomials = lexicographic_monomials(d)
     F = GF(q)
     A = ParallelEvaluateCanonicalSet(monomials, d, q)

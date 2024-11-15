@@ -13,9 +13,9 @@ function RME2DFFT(message, q, d)
     matt = zeros(Int64, q, q)
     index = 1
 
-    F = GF(q)
+    # F = GF(q)
     k = (q-1)÷(d+1)
-    ω = find_primitive_root(F, q)
+    ω = find_primitive_root(Fq, q)
     # ω_inter is (d+1)-th root of unity, not d
     ω_inter = ω^k
     roots_of_unity_vector = [toInt(ω_inter^i) for i in 0:d]
@@ -54,7 +54,7 @@ function RME2DFFT(message, q, d)
         # Interpolate the coefficient of f_(d-j)
         interp_poly = interpolate(R, x_values, y_values)
 
-        eval_poly = fft!(F, [F(toInt(coeff(interp_poly, i))) for i in 0:d+1-j], ω, q-1)
+        eval_poly = fft!(Fq, [Fq(toInt(coeff(interp_poly, i))) for i in 0:d+1-j], ω, q-1)
 
         matt[roots_of_unity_vector[j], 1] = toInt(coeff(interp_poly, 0))
         for k in 0:q-2
@@ -63,7 +63,7 @@ function RME2DFFT(message, q, d)
     end
 
     Threads.@threads for col in 1:q
-        evaluate_at_roots_of_unity = fft!(F, [F(i) for i in [matt[roots_of_unity_vector[i], col] for i in 1:d+1]], ω, q-1)
+        evaluate_at_roots_of_unity = fft!(Fq, [Fq(i) for i in [matt[roots_of_unity_vector[i], col] for i in 1:d+1]], ω, q-1)
         matt[1, col] = matt[roots_of_unity_vector[1], col]
         for t in 0:q-2
             matt[toInt(ω^t)+1, col] = toInt(evaluate_at_roots_of_unity[t+1])
@@ -71,9 +71,3 @@ function RME2DFFT(message, q, d)
     end
     return matt
 end
-
-# q = 65537
-# d = 4095
-# message = [rand(0:q-1) for _ in 1:(d+1)*(d+2)÷2]
-# @time RME2DFFT(message, q, d)
-
