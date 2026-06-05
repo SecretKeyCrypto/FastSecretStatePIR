@@ -1,6 +1,6 @@
-# Fast Secret-Key PIR
+# sk-DEPIR: Secret-Key Doubly Efficient Private Information Retrieval
 
-Implementation of secret-key Private Information Retrieval (PIR) schemes based on permuted Reed-Muller (RM) codes and their extensions. Supports two main constructions:
+Implementation of secret-key Doubly Efficient PIR (sk-DEPIR) schemes based on permuted Reed-Muller (RM) codes and their extensions. Supports two main constructions:
 
 - **RM-based PIR** — queries a degree-k curve over F_q^m; decoding uses sumcheck over q−1 points.
 - **Concatenated RM (Conc. RM)** — queries a degree-t curve over GF(q²)^m; supports larger databases at rate ≈ 1/m! with O(t)-cost decoding.
