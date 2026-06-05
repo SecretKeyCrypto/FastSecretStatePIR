@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"net/http"
+	"os"
 	"os/exec"
 	"rme/utils"
 )
@@ -36,49 +38,60 @@ type pir struct {
 	juliaCmdOut io.ReadCloser
 }
 
-// This works for any database size less than Q^2/2K^2
+// NewPIR creates a PIR instance. The encoder subprocess is started lazily on
+// the first Encode call, so Gen/Query/Decode work without any encoder installed.
 func NewPIR(params Params) *pir {
-	var pir pir
+	var p pir
+	p.params = params
+	return &p
+}
 
-	pir.params = params
+// startEncoder starts the RM encoder subprocess. The C++ binary
+// (encoding/rme) is preferred; Julia (encoding/GoRMEInterface.jl) is used as
+// fallback if the binary is not present.
+func (p *pir) startEncoder() {
+	var cmd *exec.Cmd
 
-	juliaPath, err1 := findJuliaPath()
-	if err1 != nil {
-		juliaPath = "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
+	cppBin := "../encoding/rme"
+	if _, err := os.Stat(cppBin); err == nil {
+		cmd = exec.Command(cppBin)
+	} else {
+		// Fall back to Julia.
+		juliaPath, err := findJuliaPath()
+		if err != nil {
+			juliaPath = "/Applications/Julia-1.7.app/Contents/Resources/julia/bin/julia"
+		}
+		cmd = exec.Command(juliaPath, "../encoding/GoRMEInterface.jl")
 	}
 
-	scriptPath := "../encoding/GoRMEInterface.jl"
+	p.juliaCmd = cmd
 
-	juliaCmd := exec.Command(juliaPath, scriptPath)
-	pir.juliaCmd = juliaCmd
-
-	juliaCmdIn, err := pir.juliaCmd.StdinPipe()
-	pir.juliaCmdIn = juliaCmdIn
+	cmdIn, err := cmd.StdinPipe()
 	if err != nil {
-		fmt.Println("Error getting stdin of Julia:", err)
+		fmt.Println("Error getting encoder stdin:", err)
 		panic(err)
 	}
+	p.juliaCmdIn = cmdIn
 
-	juliaCmdOut, err := pir.juliaCmd.StdoutPipe()
-	pir.juliaCmdOut = juliaCmdOut
+	cmdOut, err := cmd.StdoutPipe()
 	if err != nil {
-		fmt.Println("Error getting stdout of Julia:", err)
+		fmt.Println("Error getting encoder stdout:", err)
 		panic(err)
 	}
+	p.juliaCmdOut = cmdOut
 
-	err = pir.juliaCmd.Start()
-	if err != nil {
-		fmt.Println("Error starting Julia:", err)
+	if err = cmd.Start(); err != nil {
+		fmt.Println("Error starting encoder:", err)
 		panic(err)
 	}
-
-	return &pir
 }
 
 func (p *pir) Close() {
-	err := p.juliaCmd.Wait()
-	if err != nil {
-		fmt.Println("Error waiting for Julia:", err)
+	if p.juliaCmd == nil {
+		return
+	}
+	if err := p.juliaCmd.Wait(); err != nil {
+		fmt.Println("Error waiting for encoder:", err)
 		panic(err)
 	}
 }
@@ -137,6 +150,9 @@ func (p *pir) GenFromConfig(filename string) {
 }
 
 func (p *pir) Encode(input, output string) Matrix {
+	if p.juliaCmd == nil {
+		p.startEncoder()
+	}
 	inter := "../output/inter.csv"
 
 	// TODO: Update to support sliced encoding and pass the slice id to Encrypt function.
@@ -185,21 +201,113 @@ func (p *pir) QueryLocal(i int, filenames []string) ([]int, []int) {
 
 func (pir *pir) Decode(sums []int, query []int) []int {
 	q := int(pir.params.Q)
-	results := make([]int, len(sums)) // Create a list to store the results
+	results := make([]int, len(sums))
 
 	for i, sum := range sums {
-		dec_sum := 0
-
-		// Perform the same process for each sum in the list
+		// Accumulate in int64 to avoid per-element modular reduction.
+		// Safe as long as len(query)*(q-1) < 2^63, which holds for q < 2^31.
+		var acc int64
 		for _, po := range query {
-			dec_sum += pir.encryptor.EncryptPosition(i, int(po))
-			dec_sum %= q
+			acc += int64(pir.encryptor.EncryptPosition(i, po))
 		}
-
-		// Perform the final decoding step for each sum
-		results[i] = (dec_sum - sum + q) % q
+		decSum := int(acc % int64(q))
+		results[i] = (decSum - sum%q + q) % q
 	}
 
+	return results
+}
+
+// PrepareQuerySequenceWithNoise is the PLDN variant for the Lifted RS construction.
+// It permutes the real curve points, appends noiseCount uniform-random positions,
+// and shuffles everything. Returns (permutedAll, permutedReal):
+//   - permutedAll: the full L-length query sent to the server.
+//   - permutedReal: the ℓ=q-1 permuted real positions used during decoding.
+func (pir *pir) PrepareQuerySequenceWithNoise(realPoints []int, noiseCount int) ([]int, []int) {
+	permReal := make([]int, len(realPoints))
+	for idx, pt := range realPoints {
+		po, _ := pir.permutator.Permute(uint64(pt))
+		permReal[idx] = int(po)
+	}
+
+	qm := int(math.Pow(float64(pir.params.Q), float64(pir.params.M)))
+	all := make([]int, len(permReal)+noiseCount)
+	copy(all, permReal)
+	for k := len(permReal); k < len(all); k++ {
+		// Noise positions are uniform in the permuted space [0, q^m).
+		all[k] = rand.Intn(qm)
+	}
+	rand.Shuffle(len(all), func(a, b int) { all[a], all[b] = all[b], all[a] })
+
+	return all, permReal
+}
+
+// DecodeLifted decodes a single-slice response under the PLDN protocol where
+// the server returns individual values at every queried position.
+// serverValuesAtReal[j] = x̂[permutedReal[j]]: the server's (masked) codeword
+// value at the j-th real curve position.
+// The client subtracts PRF masks and sums over the q-1 positions; the sumcheck
+// identity Σ_{z≠t} g(z) = −g(t) then recovers f(target).
+func (pir *pir) DecodeLifted(serverValuesAtReal []int, permutedReal []int) int {
+	q := int(pir.params.Q)
+	var acc int64
+	for j, po := range permutedReal {
+		acc += int64(pir.encryptor.EncryptPosition(0, po)) - int64(serverValuesAtReal[j])
+	}
+	return int(((acc % int64(q)) + int64(q)) % int64(q))
+}
+
+// DecodeLiftedGF2n is the GF(2^n) variant of DecodeLifted.
+// Server returns individual values at each real curve position; client XORs
+// PRF masks with server values (GF addition = XOR) to recover f(target).
+func (pir *pir) DecodeLiftedGF2n(serverValuesAtReal []int, permutedReal []int) int {
+	mask := int(pir.params.Q) - 1
+	acc := 0
+	for j, po := range permutedReal {
+		acc ^= (pir.encryptor.EncryptPosition(0, po) & mask) ^ (serverValuesAtReal[j] & mask)
+	}
+	return acc
+}
+
+// ─── GF(2^n) query and decode ─────────────────────────────────────────────────
+//
+// Over GF(2^n), field addition is XOR, so the server accumulates responses with
+// XOR and the client mask-subtracts with XOR rather than integer mod-subtraction.
+
+// QueryLocalGF2n queries a permuted+encrypted local database file using GF(2^n)
+// arithmetic (XOR accumulation instead of integer addition mod q).
+func (p *pir) QueryLocalGF2n(gf *utils.GF2n, i int, filenames []string) ([]int, []int) {
+	q := int(p.params.Q)
+	points := utils.GenerateCurvePointsGF2n(gf, int(p.params.K), i)
+	query := p.PrepareQuerySequence(points)
+
+	var response []int
+	for _, filename := range filenames {
+		rmc, err := utils.ReadMatrixFromFile(filename)
+		if err != nil {
+			panic(err)
+		}
+		res := 0
+		for _, idx := range query {
+			row, col := utils.SingleIndexToRowCol(q, idx)
+			res ^= rmc[row][col]
+		}
+		response = append(response, res)
+	}
+	return response, query
+}
+
+// DecodeGF2n recovers message values from GF(2^n) server responses.
+// Uses XOR masking: result[i] = (XOR of PRF masks) XOR sums[i].
+func (pir *pir) DecodeGF2n(sums []int, query []int) []int {
+	mask := int(pir.params.Q) - 1 // q−1: masks to n bits since q = 2^n
+	results := make([]int, len(sums))
+	for i, sum := range sums {
+		var acc int
+		for _, po := range query {
+			acc ^= pir.encryptor.EncryptPosition(i, po) & mask
+		}
+		results[i] = acc ^ (sum & mask)
+	}
 	return results
 }
 

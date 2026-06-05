@@ -1,0 +1,18 @@
+# Compiled binaries
+encoding/rme
+encoding/rme_st
+encoding/bench_encode
+encoding/bench_encode_st
+
+# Intermediate output files
+output/inter.csv
+output/matrix.csv
+output/test_inter.csv
+input/db.csv
+input/test_db.csv
+
+# Claude session files
+.claude/
+
+# Go test cache
+*.test
