@@ -1295,6 +1295,60 @@ func BenchmarkDecodePLDN3D_q13_t7(b *testing.B) {
 	}
 }
 
+// ─── Concatenated RM correctness test ────────────────────────────────────────
+
+// TestConcRMDecode verifies that DecodeConcRM correctly recovers the target
+// coordinate from t+1 honest polynomial evaluations for several field sizes.
+// This tests the core mathematical invariant: ψ has degree t, so Lagrange
+// interpolation on t+1 evaluations at nonzero z-values recovers ψ(0) = target.
+func TestConcRMDecode(t *testing.T) {
+	cases := []struct{ n, degree int }{
+		{8, 3},
+		{13, 7},
+		{14, 6},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(fmt.Sprintf("n=%d_t=%d", c.n, c.degree), func(t *testing.T) {
+			gf := utils.NewGF2n(c.n)
+			gf2 := utils.NewGF2nExt2(gf)
+			q := int(gf.Q)
+			rng := rand.New(rand.NewSource(42))
+
+			for trial := 0; trial < 20; trial++ {
+				// Pick a random target value in F_q.
+				target := uint32(rng.Intn(q))
+				zero := utils.GFExt2Elem{}
+				targetElem := utils.GFExt2Elem{A: target, B: 0}
+
+				// Sample a random degree-t polynomial ψ over GF(q²) with ψ(0) = target.
+				psi := gf2.RandPolyWithValue(c.degree, zero, targetElem)
+
+				// Sample t+1 distinct nonzero z-values and precompute Lagrange weights.
+				zvals := gf2.RandDistinctNonzero(c.degree + 1)
+				weights := gf2.LagrangeWeightsAt0(zvals)
+				aux := utils.ConcAux{LagrangeWeights: weights, ZVals: zvals}
+
+				// Simulate honest server: y0[j] = φ(ψ(z_j), 0) = ψ(z_j).A
+				//                        y1[j] = φ(ψ(z_j), 1) = ψ(z_j).A ⊕ ψ(z_j).B
+				y0 := make([]uint32, c.degree+1)
+				y1 := make([]uint32, c.degree+1)
+				for j := 0; j <= c.degree; j++ {
+					v := gf2.EvalPoly(psi, zvals[j])
+					y0[j] = v.A
+					y1[j] = v.A ^ v.B
+				}
+
+				got := utils.DecodeConcRM(gf2, y0, y1, aux)
+				if got != target {
+					t.Errorf("trial %d: target=%d got=%d (n=%d t=%d)",
+						trial, target, got, c.n, c.degree)
+				}
+			}
+		})
+	}
+}
+
 // ─── Concatenated RM m=3 benchmarks (Table 2 last column) ───────────────────
 //
 // Parameters follow Fig. 4 with d = q-1, e = 2:
