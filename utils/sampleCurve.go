@@ -142,9 +142,13 @@ func GenerateCurvePoints3D(degree, q, i int) []int {
 //      since ψ has degree t and any t+1 evaluations uniquely determine ψ(0).
 //
 // Decode (DConc):
-//   Given server responses at w=0 and w=1 for each j-block:
-//     uⱼ = (y_{j,0}, y_{j,0}⊕y_{j,1})  (linear interp in GF(q²))
-//   Then f(0) = Σⱼ uⱼ · λⱼ(0) via precomputed weights.
+//   For each of the t+1 interpolation blocks, the server has returned q values
+//   yBlock[j][w] = db[φ(ψ(zⱼ), w)] for w ∈ Fq.
+//   Step 1 — φ⁻¹ (O(q) per block): recover ψ(zⱼ) ∈ GF(q²) via
+//     uⱼ = Σ_{w ∈ Fq} yBlock[j][w] · (β+w)⁻¹
+//   This is valid because Π_{v ∈ Fq}(β+v) = β^q+β = 1, so the Lagrange
+//   weights at point β for nodes Fq are simply (β+w)⁻¹ (precomputed once).
+//   Step 2 — outer Lagrange (O(t)): ψ(0) = Σⱼ uⱼ · λⱼ(0).
 
 // GenerateConcCurvePoints3D generates the Conc. RM query for a 3D (m=3) database.
 // Returns (checksum, ℓ, ConcAux):
@@ -200,16 +204,15 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, i int) (uint64, int, ConcAux) {
 	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: interp}
 }
 
-// DecodeConcRM recovers f(0) ∈ GF(q) from s pairs of server values.
-// For each j-block the client only needs the responses at w=0 and w=1:
-//   uⱼ.A = y_{j,0},   uⱼ.B = y_{j,0} ⊕ y_{j,1}
-// Then f(0) = Σⱼ uⱼ · λⱼ(0).  Returns the A-component (in F_q).
-func DecodeConcRM(gf2 *GF2nExt2, y0, y1 []uint32, aux ConcAux) uint32 {
-	// aux.ZVals holds only the t+1 interpolation points (not all s query points).
+// DecodeConcRM recovers ψ(0) ∈ GF(q) from t+1 blocks of q server responses each.
+// yBlocks[j][w] = db[φ(ψ(zⱼ), w)] for j ∈ [t+1], w ∈ Fq.
+// Step 1: φ⁻¹ per block — O(q) scalar-GF(q²) multiplies using precomputed (β+w)⁻¹.
+// Step 2: outer Lagrange at 0 — O(t) GF(q²) multiplies using precomputed λⱼ(0).
+func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) uint32 {
 	n := len(aux.ZVals)
 	uvals := make([]GFExt2Elem, n)
 	for j := 0; j < n; j++ {
-		uvals[j] = GFExt2Elem{y0[j], y0[j] ^ y1[j]}
+		uvals[j] = gf2.PhiInv(yBlocks[j])
 	}
 	result := gf2.EvalLagrangeAt0(uvals, aux.LagrangeWeights)
 	return result.A

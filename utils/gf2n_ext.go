@@ -8,19 +8,35 @@ type GFExt2Elem struct{ A, B uint32 }
 // GF2nExt2 represents GF(q²) = GF(q)[β]/(β²+β+C) where Tr_{GF(q)/GF(2)}(C) = 1.
 // Elements are (a, b) representing a + b·β, with β² = β + C.
 type GF2nExt2 struct {
-	Base *GF2n
-	C    uint32 // irreducible constant; β² = β + C
+	Base           *GF2n
+	C              uint32         // irreducible constant; β² = β + C
+	BetaInvWeights []GFExt2Elem   // BetaInvWeights[w] = (β+w)⁻¹ for w ∈ Fq; used by PhiInv
 }
 
 // NewGF2nExt2 constructs GF(q²) as a degree-2 extension of GF(q).
 // Finds the first C ∈ GF(q)* with absolute trace Tr(C)=1 so β²+β+C is irreducible.
+// Also precomputes BetaInvWeights[w] = (β+w)⁻¹ for w = 0..q-1.
 func NewGF2nExt2(base *GF2n) *GF2nExt2 {
+	var C uint32
 	for x := uint32(1); x < base.Q; x++ {
 		if absTrace(base, x) == 1 {
-			return &GF2nExt2{Base: base, C: x}
+			C = x
+			break
 		}
 	}
-	panic("GF2nExt2: no element with absolute trace 1 found")
+	if C == 0 {
+		panic("GF2nExt2: no element with absolute trace 1 found")
+	}
+	g := &GF2nExt2{Base: base, C: C}
+
+	// Precompute (β+w)⁻¹ for all w ∈ Fq.
+	// β+w = GFExt2Elem{w, 1}; β ∉ Fq so β+w ≠ 0 for all w.
+	// These weights support O(q) φ⁻¹ recovery: PhiInv(y) = Σ_w y[w]·(β+w)⁻¹.
+	g.BetaInvWeights = make([]GFExt2Elem, base.Q)
+	for w := uint32(0); w < base.Q; w++ {
+		g.BetaInvWeights[w] = g.Inv(GFExt2Elem{w, 1})
+	}
+	return g
 }
 
 // absTrace computes Tr_{GF(2^n)/GF(2)}(x) = x ⊕ x² ⊕ x⁴ ⊕ … ⊕ x^(2^(n-1)) mod 2.
@@ -115,6 +131,28 @@ func (g *GF2nExt2) Phi(e GFExt2Elem, w uint32) uint32 {
 type ConcAux struct {
 	LagrangeWeights []GFExt2Elem
 	ZVals           []GFExt2Elem
+}
+
+// ScalarMul returns e·a where a ∈ Fq, using two base-field multiplications.
+func (g *GF2nExt2) ScalarMul(e GFExt2Elem, a uint32) GFExt2Elem {
+	if a == 0 {
+		return GFExt2Elem{}
+	}
+	return GFExt2Elem{g.Base.Mul(e.A, a), g.Base.Mul(e.B, a)}
+}
+
+// PhiInv recovers u ∈ GF(q²) from its q φ-projections yBlock[w] = φ(u,w) = u.A⊕u.B⊗w.
+// Uses the identity Σ_{w ∈ Fq} φ(u,w)·(β+w)⁻¹ = u, which follows from the Lagrange
+// formula with nodes Fq at point β and the fact that Π_{v ∈ Fq}(β+v) = β^q+β = 1.
+// len(yBlock) must equal int(g.Base.Q).
+func (g *GF2nExt2) PhiInv(yBlock []uint32) GFExt2Elem {
+	var acc GFExt2Elem
+	for w, y := range yBlock {
+		if y != 0 {
+			acc = g.Add(acc, g.ScalarMul(g.BetaInvWeights[w], y))
+		}
+	}
+	return acc
 }
 
 // LagrangeWeightsAt0 precomputes λⱼ(0) for all j in O(s²).

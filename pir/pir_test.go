@@ -1297,10 +1297,11 @@ func BenchmarkDecodePLDN3D_q13_t7(b *testing.B) {
 
 // ─── Concatenated RM correctness test ────────────────────────────────────────
 
-// TestConcRMDecode verifies that DecodeConcRM correctly recovers the target
-// coordinate from t+1 honest polynomial evaluations for several field sizes.
-// This tests the core mathematical invariant: ψ has degree t, so Lagrange
-// interpolation on t+1 evaluations at nonzero z-values recovers ψ(0) = target.
+// TestConcRMDecode verifies the full φ⁻¹ + outer-Lagrange decode pipeline.
+// Two sub-tests per field size:
+//   "identity" — db[p]=p; PhiInv must recover ψ(zⱼ) exactly.
+//   "linear"   — db[p]=a·p⊕b; exercises a nontrivial (but degree-1) database so
+//                that f∘ψ still has degree t and the t+1 outer Lagrange is exact.
 func TestConcRMDecode(t *testing.T) {
 	cases := []struct{ n, degree int }{
 		{8, 3},
@@ -1315,34 +1316,38 @@ func TestConcRMDecode(t *testing.T) {
 			q := int(gf.Q)
 			rng := rand.New(rand.NewSource(42))
 
-			for trial := 0; trial < 20; trial++ {
-				// Pick a random target value in F_q.
+			for trial := 0; trial < 10; trial++ {
 				target := uint32(rng.Intn(q))
 				zero := utils.GFExt2Elem{}
-				targetElem := utils.GFExt2Elem{A: target, B: 0}
+				psi := gf2.RandPolyWithValue(c.degree, zero, utils.GFExt2Elem{A: target, B: 0})
 
-				// Sample a random degree-t polynomial ψ over GF(q²) with ψ(0) = target.
-				psi := gf2.RandPolyWithValue(c.degree, zero, targetElem)
-
-				// Sample t+1 distinct nonzero z-values and precompute Lagrange weights.
 				zvals := gf2.RandDistinctNonzero(c.degree + 1)
 				weights := gf2.LagrangeWeightsAt0(zvals)
 				aux := utils.ConcAux{LagrangeWeights: weights, ZVals: zvals}
 
-				// Simulate honest server: y0[j] = φ(ψ(z_j), 0) = ψ(z_j).A
-				//                        y1[j] = φ(ψ(z_j), 1) = ψ(z_j).A ⊕ ψ(z_j).B
-				y0 := make([]uint32, c.degree+1)
-				y1 := make([]uint32, c.degree+1)
-				for j := 0; j <= c.degree; j++ {
-					v := gf2.EvalPoly(psi, zvals[j])
-					y0[j] = v.A
-					y1[j] = v.A ^ v.B
+				buildBlocks := func(db func(uint32) uint32) [][]uint32 {
+					blocks := make([][]uint32, c.degree+1)
+					for j := 0; j <= c.degree; j++ {
+						v := gf2.EvalPoly(psi, zvals[j])
+						blocks[j] = make([]uint32, q)
+						for w := 0; w < q; w++ {
+							blocks[j][w] = db(gf2.Phi(v, uint32(w)))
+						}
+					}
+					return blocks
 				}
 
-				got := utils.DecodeConcRM(gf2, y0, y1, aux)
-				if got != target {
-					t.Errorf("trial %d: target=%d got=%d (n=%d t=%d)",
-						trial, target, got, c.n, c.degree)
+				// identity database: db[p] = p
+				if got := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return p }), aux); got != target {
+					t.Errorf("identity trial %d: want %d got %d (n=%d t=%d)", trial, target, got, c.n, c.degree)
+				}
+
+				// linear database: db[p] = a·p ⊕ b  (f∘ψ has degree t → t+1 points exact)
+				a := uint32(rng.Intn(q-1)) + 1 // nonzero
+				b := uint32(rng.Intn(q))
+				want := gf.Mul(a, target) ^ b
+				if got := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return gf.Mul(a, p) ^ b }), aux); got != want {
+					t.Errorf("linear trial %d: want %d got %d (n=%d t=%d)", trial, want, got, c.n, c.degree)
 				}
 			}
 		})
@@ -1364,8 +1369,8 @@ func TestConcRMDecode(t *testing.T) {
 // Using all s evaluations (O(s²) precomp) is unnecessary.
 //
 // Decode timing:
-//   1. Linear interpolation: t+1 trivial 2-point recoveries O(t)
-//   2. Lagrange weighted sum over t+1 points                O(t)
+//   1. φ⁻¹ step (O(q) scalar-GF(q²) muls per block, t+1 blocks)  O(q·t)  ← dominates
+//   2. Outer Lagrange weighted sum over t+1 points                 O(t)
 
 var paramsConcRM3D = []struct {
 	n, t  int
@@ -1380,7 +1385,7 @@ var paramsConcRM3D = []struct {
 }
 
 // BenchmarkQueryGenConcRM3D measures Conc. RM query generation.
-// Includes: GF(q²) evaluations, φ-projection checksum, and O(s²) Lagrange precomp.
+// Includes: GF(q²) evaluations, φ-projection checksum, and O(t²) Lagrange precomp.
 func BenchmarkQueryGenConcRM3D(b *testing.B) {
 	for _, p := range paramsConcRM3D {
 		p := p
@@ -1407,9 +1412,8 @@ func BenchmarkQueryGenConcRM3D(b *testing.B) {
 	}
 }
 
-// BenchmarkDecodeConcRM3D measures Conc. RM decode given precomputed Lagrange weights.
-// With O(t²) Lagrange precomp (using only t+1 interpolation points instead of all s),
-// setup is now negligible (~µs) and all parameter sizes can be benchmarked.
+// BenchmarkDecodeConcRM3D measures the full Conc. RM decode:
+// φ⁻¹ (O(q·(t+1)) scalar-GF(q²) ops) + outer Lagrange at 0 (O(t) GF(q²) ops).
 func BenchmarkDecodeConcRM3D(b *testing.B) {
 	for _, p := range paramsConcRM3D {
 		p := p
@@ -1419,28 +1423,30 @@ func BenchmarkDecodeConcRM3D(b *testing.B) {
 			q := int(gf.Q)
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-			// Precompute Lagrange weights using only t+1 points — O(t²), negligible.
+			// Precompute outer Lagrange weights for t+1 interpolation points.
 			zvals := gf2.RandDistinctNonzero(p.t + 1)
 			weights := gf2.LagrangeWeightsAt0(zvals)
 			aux := utils.ConcAux{LagrangeWeights: weights, ZVals: zvals}
 
-			// Mock server responses at w=0 and w=1 for each of the t+1 interpolation points.
-			y0 := make([]uint32, p.t+1)
-			y1 := make([]uint32, p.t+1)
-			for j := range y0 {
-				y0[j] = uint32(rng.Intn(q))
-				y1[j] = uint32(rng.Intn(q))
+			// Mock server responses: q values per block, t+1 blocks.
+			yBlocks := make([][]uint32, p.t+1)
+			for j := range yBlocks {
+				yBlocks[j] = make([]uint32, q)
+				for w := range yBlocks[j] {
+					yBlocks[j][w] = uint32(rng.Intn(q))
+				}
 			}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				utils.DecodeConcRM(gf2, y0, y1, aux)
+				utils.DecodeConcRM(gf2, yBlocks, aux)
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			fmt.Printf("  %-65s decode:    %v  (t+1=%d points, O(t) weighted sum)\n", p.label, total/time.Duration(b.N), p.t+1)
+			fmt.Printf("  %-65s decode:    %v  (φ⁻¹+Lagrange, t+1=%d blocks × q=%d)\n",
+				p.label, total/time.Duration(b.N), p.t+1, q)
 		})
 	}
 }

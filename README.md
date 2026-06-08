@@ -103,12 +103,12 @@ Parameters are defined in `pir/pir_test.go`. To evaluate different field sizes o
 
 | n | q | t | s | ℓ | Query gen | Decode |
 |---|---|---|---|---|-----------|--------|
-| 13 | 8192 | 7 | 57338 | 470M | ~820ms | <1µs |
-| 14 | 16384 | 6 | 98299 | 1.6B | ~2.8s | <1µs |
-| 16 | 65536 | 5 | 327676 | 21.5B | ~38s | <1µs |
-| 16 | 65536 | 6 | 393211 | 25.8B | ~47s | <1µs |
+| 13 | 8192 | 7 | 57338 | 470M | ~820ms | ~220µs |
+| 14 | 16384 | 6 | 98299 | 1.6B | ~2.8s | ~320µs |
+| 16 | 65536 | 5 | 327676 | 21.5B | ~38s | ~1.0ms |
+| 16 | 65536 | 6 | 393211 | 25.8B | ~47s | ~1.0ms |
 
-Query gen is dominated by the φ-projection (O(s·q) GF(q) operations, single-threaded). Decode uses only t+1 ≤ 8 Lagrange weights and takes O(t) GF(q²) multiplications.
+Query gen is dominated by the φ-projection (O(s·q) GF(q) operations, single-threaded). Decode uses the φ⁻¹ step (O(q·(t+1)) scalar-GF(q²) multiplications using precomputed (β+w)⁻¹ weights) followed by outer Lagrange at 0 (O(t) GF(q²) multiplications).
 
 ## Field Arithmetic
 
