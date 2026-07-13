@@ -2,10 +2,12 @@
 
 Implementation of secret-key Doubly Efficient PIR (sk-DEPIR) schemes based on permuted Reed-Muller (RM) codes and their extensions. Supports two main constructions:
 
-- **RM-based PIR** — queries a degree-k curve over F_q^m; decoding uses sumcheck over q−1 points.
+- **Lifted-RM PIR (PLDN)** — queries a degree-t curve over F_q^m built on lifted Reed–Solomon codes (rate → 1, low storage overhead). The client uses the **Permuted Low-Degree with Noise (PLDN)** protocol: it injects `λ = 128` random *noise* positions into the q−1 real curve points and shuffles all of them, so the server cannot tell real from fake. The server therefore returns **per-position** values (it cannot aggregate, as noise would corrupt a sum); at decode the client maps the responses back to the real positions, discards the noise, and recovers the record by sumcheck over the q−1 real points. This is the construction used in all benchmarks below.
 - **Concatenated RM (Conc. RM)** — queries a degree-t curve over GF(q²)^m; supports larger databases at rate ≈ 1/m! with O(t)-cost decoding.
 
 Both constructions support GF(2^n) fields (XOR-based accumulation) in addition to prime-order fields.
+
+> A no-noise "plain" RM path (server aggregates into a single sum, `Decode`) also exists for comparison, but the PLDN path is the one that provides query privacy and is what the benchmarks and paper tables measure.
 
 ## Requirements
 
@@ -46,27 +48,28 @@ All benchmarks are in `pir/pir_test.go`. Run from the `pir/` directory:
 cd pir
 ```
 
-### RM Query Generation (prime field)
+All Lifted-RM benchmarks inject `noiseCount = 128` (PLDN). Each sub-benchmark covers both prime-order and GF(2^n) fields at matching bandwidth.
+
+### Lifted-RM (PLDN) Query Generation
 
 ```bash
-go test -bench BenchmarkGenerateQuery       # 2D, m=2
-go test -bench BenchmarkGenerate3DQuery     # 3D, m=3
-go test -bench BenchmarkGenerate4DQuery     # 4D, m=4
+go test -bench BenchmarkQueryGenPLDN2D        # m=2, prime + GF(2^n)
+go test -bench BenchmarkQueryGen3D_t5         # m=3, t=5
+go test -bench BenchmarkQueryGen3D_t6         # m=3, t=6
+go test -bench BenchmarkQueryGenPLDN3D_q13_t7 # m=3, q=2^13, t=7
 ```
 
-### RM Query Generation (GF(2^n))
+Query generation appends the 128 noise positions and shuffles all `L = (q−1) + 128` positions; the noise overhead over the plain path is negligible (≈2%).
+
+### Lifted-RM (PLDN) Decoding
 
 ```bash
-go test -bench BenchmarkQueryGenGF2n2D      # 2D over GF(2^n)
-go test -bench BenchmarkQueryGenGF2n3D      # 3D over GF(2^n)
+go test -bench BenchmarkDecodePLDN2D          # m=2, prime + GF(2^n)
+go test -bench BenchmarkDecode3D_t5           # m=3, t=5
+go test -bench BenchmarkDecode3D_t6           # m=3, t=6
 ```
 
-### RM Decoding
-
-```bash
-go test -bench BenchmarkDecoding3DQuery     # prime field, m=3
-go test -bench BenchmarkDecodingGF2n3D      # GF(2^n), m=3
-```
+The decode time includes the **map-back** step: build a hashmap of the q−1 real positions, scan all `L` server responses to extract the values at real positions (discarding noise), then run the sumcheck. This map-back is O(q) and dominates decode at large q.
 
 ### Concatenated RM (Conc. RM) — Query Generation
 

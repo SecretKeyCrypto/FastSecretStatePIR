@@ -20,6 +20,7 @@ type GF2n struct {
 var gf2nPrimPolys = map[int]uint32{
 	4:  0x13,     // x^4 + x + 1
 	8:  0x11D,    // x^8 + x^4 + x^3 + x^2 + 1
+	12: 0x1053,   // x^12 + x^6 + x^4 + x + 1
 	13: 0x201B,   // x^13 + x^4 + x^3 + x + 1
 	14: 0x402B,   // x^14 + x^5 + x^3 + x + 1
 	16: 0x1002D,  // x^16 + x^5 + x^3 + x^2 + 1

@@ -1104,6 +1104,11 @@ var paramsPLDN2D = []struct {
 	{262144, 7, true, "GF(2^18) q=262144  m=2 bw=262143 t=7"},
 	{1048573, 7, false, "prime q=1048573(2^20-3)  m=2 bw=1048572 t=7"},
 	{1048576, 7, true, "GF(2^20) q=1048576 m=2 bw=1048575 t=7"},
+	// Table 1 new parameter selections (Bounded 2^50 column).
+	{4093, 6, false, "prime q=4093   (2^12-3)  m=2 bw=4092   t=6"},
+	{32749, 5, false, "prime q=32749  (2^15-19) m=2 bw=32748  t=5"},
+	{262139, 5, false, "prime q=262139 (2^18-5)  m=2 bw=262138 t=5"},
+	{1048573, 5, false, "prime q=1048573(2^20-3)  m=2 bw=1048572 t=5"},
 }
 
 func BenchmarkQueryGenPLDN2D(b *testing.B) {
@@ -1382,6 +1387,13 @@ var paramsConcRM3D = []struct {
 	{14, 6, "GF(2^14) q=16384 m=3 t=6  s=98299  ℓ=1.6B"},
 	{16, 5, "GF(2^16) q=65536 m=3 t=5  s=327676 ℓ=21.5B"},
 	{16, 6, "GF(2^16) q=65536 m=3 t=6  s=393211 ℓ=25.8B"},
+	// Table 2 new parameter selections.
+	{12, 6, "GF(2^12) q=4096  m=3 t=6  new"},
+	{13, 6, "GF(2^13) q=8192  m=3 t=6  new"},
+	{12, 4, "GF(2^12) q=4096  m=3 t=4  new"},
+	{13, 4, "GF(2^13) q=8192  m=3 t=4  new"},
+	{14, 4, "GF(2^14) q=16384 m=3 t=4  new"},
+	{16, 4, "GF(2^16) q=65536 m=3 t=4  new"},
 }
 
 // BenchmarkQueryGenConcRM3D measures Conc. RM query generation.
