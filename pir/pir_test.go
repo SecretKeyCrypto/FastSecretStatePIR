@@ -1359,6 +1359,57 @@ func TestConcRMDecode(t *testing.T) {
 	}
 }
 
+// TestConcRMDecodeHighDegree verifies that decoding a genuine degree-d RM
+// codeword needs s = dt+1 outer points, not t+1. The codeword restricted to the
+// curve, g = f∘ψ, has degree d·t; interpolating it at 0 from only t+1 points
+// gives the wrong answer, while s = dt+1 points recover f(i) exactly.
+func TestConcRMDecodeHighDegree(t *testing.T) {
+	gf := utils.NewGF2n(8)
+	gf2 := utils.NewGF2nExt2(gf)
+	q := int(gf.Q)
+	d := q - 1
+	curveDeg := 3        // t
+	gDeg := d * curveDeg // deg(g) = d·t
+	s := gDeg + 1
+	rng := rand.New(rand.NewSource(7))
+
+	// Random degree-gDeg g over GF(q²) modelling f∘ψ, with g(0) = f(i) ∈ Fq.
+	g := make([]utils.GFExt2Elem, gDeg+1)
+	for i := range g {
+		g[i] = utils.GFExt2Elem{A: uint32(rng.Intn(q)), B: uint32(rng.Intn(q))}
+	}
+	g[0].B = 0
+	want := g[0].A
+
+	zvals := gf2.RandDistinctNonzero(s)
+
+	// blocks[j][w] = φ(g(zⱼ), w); PhiInv then recovers g(zⱼ).
+	buildBlocks := func(n int) [][]uint32 {
+		blocks := make([][]uint32, n)
+		for j := 0; j < n; j++ {
+			u := gf2.EvalPoly(g, zvals[j])
+			blocks[j] = make([]uint32, q)
+			for w := 0; w < q; w++ {
+				blocks[j][w] = gf2.Phi(u, uint32(w))
+			}
+		}
+		return blocks
+	}
+
+	// s = dt+1 points recover f(i) exactly.
+	auxFull := utils.ConcAux{LagrangeWeights: gf2.LagrangeWeightsAt0(zvals), ZVals: zvals}
+	if got := utils.DecodeConcRM(gf2, buildBlocks(s), auxFull); got != want {
+		t.Fatalf("s=%d points: want %d got %d", s, want, got)
+	}
+
+	// t+1 points are insufficient for a degree-d·t polynomial.
+	short := zvals[:curveDeg+1]
+	auxShort := utils.ConcAux{LagrangeWeights: gf2.LagrangeWeightsAt0(short), ZVals: short}
+	if got := utils.DecodeConcRM(gf2, buildBlocks(curveDeg+1), auxShort); got == want {
+		t.Errorf("t+1=%d points unexpectedly decoded correctly for degree-%d g", curveDeg+1, gDeg)
+	}
+}
+
 // ─── Concatenated RM m=3 benchmarks (Table 2 last column) ───────────────────
 //
 // Parameters follow Fig. 4 with d = q-1, e = 2:
@@ -1368,14 +1419,14 @@ func TestConcRMDecode(t *testing.T) {
 //   1. Sampling m degree-t polynomials over GF(q²)          O(m·t)
 //   2. Evaluating them at s points in GF(q²)                O(m·t·s)
 //   3. Streaming all ℓ = s·q query indices (checksum only)  O(m·s·q)  ← dominates
-//   4. Lagrange weight precomp for t+1 points only          O(t²)     ← negligible (µs)
+//   4. Lagrange weight precomp over all s points            O(s²)
 //
-// ψ has degree t, so t+1 evaluations suffice for unique interpolation.
-// Using all s evaluations (O(s²) precomp) is unnecessary.
+// The codeword restricted to the curve, g = f∘ψ, has degree d·t, so all
+// s = dt+1 evaluations are required to interpolate g(0) = f(i).
 //
 // Decode timing:
-//   1. φ⁻¹ step (O(q) scalar-GF(q²) muls per block, t+1 blocks)  O(q·t)  ← dominates
-//   2. Outer Lagrange weighted sum over t+1 points                 O(t)
+//   1. φ⁻¹ step (O(q) scalar-GF(q²) muls per block, s blocks)   O(q·s)  ← dominates
+//   2. Outer Lagrange weighted sum over s points                  O(s)
 
 var paramsConcRM3D = []struct {
 	n, t  int
@@ -1425,7 +1476,14 @@ func BenchmarkQueryGenConcRM3D(b *testing.B) {
 }
 
 // BenchmarkDecodeConcRM3D measures the full Conc. RM decode:
-// φ⁻¹ (O(q·(t+1)) scalar-GF(q²) ops) + outer Lagrange at 0 (O(t) GF(q²) ops).
+// φ⁻¹ (O(q·s) scalar-GF(q²) ops) + outer Lagrange at 0 (O(s) GF(q²) ops),
+// where s = dt+1 since g = f∘ψ has degree d·t.
+//
+// The O(s²) Lagrange-weight precompute is one-time client setup (amortizable
+// across queries, since the z-values can be fixed), not part of per-query decode.
+// Field multiplies are constant-time in their operands, so decode timing does not
+// depend on the weight/z values — we fill length-s buffers directly to isolate the
+// per-query decode cost and keep GF(2^16) feasible.
 func BenchmarkDecodeConcRM3D(b *testing.B) {
 	for _, p := range paramsConcRM3D {
 		p := p
@@ -1433,20 +1491,28 @@ func BenchmarkDecodeConcRM3D(b *testing.B) {
 			gf := utils.NewGF2n(p.n)
 			gf2 := utils.NewGF2nExt2(gf)
 			q := int(gf.Q)
+			s := (q-1)*p.t + 1 // s = dt+1 with d = q-1
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-			// Precompute outer Lagrange weights for t+1 interpolation points.
-			zvals := gf2.RandDistinctNonzero(p.t + 1)
-			weights := gf2.LagrangeWeightsAt0(zvals)
+			// Length-s weight and z-value buffers (values irrelevant to timing).
+			weights := make([]utils.GFExt2Elem, s)
+			for j := range weights {
+				weights[j] = utils.GFExt2Elem{A: uint32(rng.Intn(q)), B: uint32(rng.Intn(q))}
+			}
+			zvals := make([]utils.GFExt2Elem, s)
 			aux := utils.ConcAux{LagrangeWeights: weights, ZVals: zvals}
 
-			// Mock server responses: q values per block, t+1 blocks.
-			yBlocks := make([][]uint32, p.t+1)
+			// Mock server responses: q values per block, s blocks. All s blocks
+			// alias one q-sized buffer so memory stays O(q) instead of O(ℓ)=O(s·q),
+			// which would be tens–hundreds of GB for GF(2^16). The decode arithmetic
+			// (s φ⁻¹ passes + s Lagrange muls) is unaffected by the aliasing.
+			block := make([]uint32, q)
+			for w := range block {
+				block[w] = uint32(rng.Intn(q))
+			}
+			yBlocks := make([][]uint32, s)
 			for j := range yBlocks {
-				yBlocks[j] = make([]uint32, q)
-				for w := range yBlocks[j] {
-					yBlocks[j][w] = uint32(rng.Intn(q))
-				}
+				yBlocks[j] = block
 			}
 
 			var total time.Duration
@@ -1457,8 +1523,8 @@ func BenchmarkDecodeConcRM3D(b *testing.B) {
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			fmt.Printf("  %-65s decode:    %v  (φ⁻¹+Lagrange, t+1=%d blocks × q=%d)\n",
-				p.label, total/time.Duration(b.N), p.t+1, q)
+			fmt.Printf("  %-65s decode:    %v  (φ⁻¹+Lagrange, s=%d blocks × q=%d)\n",
+				p.label, total/time.Duration(b.N), s, q)
 		})
 	}
 }

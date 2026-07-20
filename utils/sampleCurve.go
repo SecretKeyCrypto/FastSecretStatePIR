@@ -138,17 +138,18 @@ func GenerateCurvePoints3D(degree, q, i int) []int {
 //   2. Sample s distinct nonzero z₁,…,zₛ ∈ GF(q²)*.
 //   3. For each j: evaluate ψₕ(zⱼ) ∈ GF(q²); project to q points in F_q^m
 //      via φ(a+bβ, w) = a ⊕ b⊗w for w = 0,1,…,q-1.
-//   4. Precompute Lagrange weights λⱼ(0) for the first t+1 z-values only (O(t²))
-//      since ψ has degree t and any t+1 evaluations uniquely determine ψ(0).
+//   4. Precompute Lagrange weights λⱼ(0) for all s z-values (O(s²)) since the
+//      codeword restricted to the curve, g = f∘ψ, has degree d·t and needs
+//      s = dt+1 evaluations to be uniquely determined at 0.
 //
 // Decode (DConc):
-//   For each of the t+1 interpolation blocks, the server has returned q values
+//   For each of the s interpolation blocks, the server has returned q values
 //   yBlock[j][w] = db[φ(ψ(zⱼ), w)] for w ∈ Fq.
-//   Step 1 — φ⁻¹ (O(q) per block): recover ψ(zⱼ) ∈ GF(q²) via
+//   Step 1 — φ⁻¹ (O(q) per block): recover uⱼ = g(zⱼ) ∈ GF(q²) via
 //     uⱼ = Σ_{w ∈ Fq} yBlock[j][w] · (β+w)⁻¹
 //   This is valid because Π_{v ∈ Fq}(β+v) = β^q+β = 1, so the Lagrange
 //   weights at point β for nodes Fq are simply (β+w)⁻¹ (precomputed once).
-//   Step 2 — outer Lagrange (O(t)): ψ(0) = Σⱼ uⱼ · λⱼ(0).
+//   Step 2 — outer Lagrange (O(s)): f(i) = g(0) = Σⱼ uⱼ · λⱼ(0).
 
 // GenerateConcCurvePoints3D generates the Conc. RM query for a 3D (m=3) database.
 // Returns (checksum, ℓ, ConcAux):
@@ -196,18 +197,19 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, i int) (uint64, int, ConcAux) {
 		}
 	}
 
-	// ψ has degree t, so t+1 evaluations uniquely determine it.
-	// Precompute Lagrange weights for just the first t+1 z-values: O(t²) instead of O(s²).
-	interp := zvals[:t+1]
-	weights := gf2.LagrangeWeightsAt0(interp)
+	// The codeword restricted to the curve, g = f∘ψ, has degree d·t (f has total
+	// degree d, ψ has degree t), so all s = dt+1 evaluations are needed to
+	// determine g(0) = f(i). Precompute Lagrange weights over all s z-values: O(s²).
+	weights := gf2.LagrangeWeightsAt0(zvals)
 
-	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: interp}
+	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: zvals}
 }
 
-// DecodeConcRM recovers ψ(0) ∈ GF(q) from t+1 blocks of q server responses each.
-// yBlocks[j][w] = db[φ(ψ(zⱼ), w)] for j ∈ [t+1], w ∈ Fq.
+// DecodeConcRM recovers f(i) = g(0) ∈ GF(q) from s = dt+1 blocks of q server
+// responses each, where g = f∘ψ has degree d·t.
+// yBlocks[j][w] = db[φ(ψ(zⱼ), w)] for j ∈ [s], w ∈ Fq.
 // Step 1: φ⁻¹ per block — O(q) scalar-GF(q²) multiplies using precomputed (β+w)⁻¹.
-// Step 2: outer Lagrange at 0 — O(t) GF(q²) multiplies using precomputed λⱼ(0).
+// Step 2: outer Lagrange at 0 — O(s) GF(q²) multiplies using precomputed λⱼ(0).
 func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) uint32 {
 	n := len(aux.ZVals)
 	uvals := make([]GFExt2Elem, n)
