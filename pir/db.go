@@ -6,30 +6,34 @@ import (
 	"time"
 )
 
+// FakeDB writes n uniformly sampled values in [0,q) for tests and benchmarks.
 func FakeDB(q int, n int, filename string) []int {
-	rand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	message := make([]int, n) // Create a slice to hold the numbers.
 	for i := range message {
-		message[i] = rand.Intn(q) // Generate a random number in [0, q).
+		message[i] = rng.Intn(q) // Generate a random number in [0, q).
 	}
 
-	utils.WriteSliceToCSV(filename, message)
+	if err := utils.WriteSliceToCSV(filename, message); err != nil {
+		panic(err)
+	}
 	return message
 }
 
+// Matrix is the common mutable storage abstraction used by offline encoding.
 type Matrix interface {
 	Get(indices ...int) int
 	GetByIndex(index int) int
 	Set(value int, indices ...int)
-	SetByIndex(value int, index int)
+	SetByIndex(index int, value int)
 	Dimensions() []int
 	SetData(data interface{})
 	Size() int
 	Data() interface{}
 }
 
-// 2D matrix
+// Matrix2D stores a q-by-q codeword using the repository's flattened-index convention.
 type Matrix2D struct {
 	data [][]int
 	q    int
@@ -82,7 +86,7 @@ func (m *Matrix2D) SetData(data interface{}) {
 }
 
 func (m Matrix2D) CoordinateToIndex(i, j int) int {
-	return i*m.q + j
+	return j*m.q + i
 }
 
 func (m Matrix2D) IndexToCoordinate(index int) []int {
@@ -91,7 +95,7 @@ func (m Matrix2D) IndexToCoordinate(index int) []int {
 	return []int{i, j}
 }
 
-// 3D matrix
+// Matrix3D stores a q-by-q-by-q codeword using the repository's flattened-index convention.
 type Matrix3D struct {
 	data [][][]int
 	q    int
@@ -139,14 +143,12 @@ func (m *Matrix3D) SetData(data interface{}) {
 	if d, ok := data.([][][]int); ok {
 		m.data = d
 	} else {
-		panic("Invalid data type for Matrix2D")
+		panic("Invalid data type for Matrix3D")
 	}
 }
 
 func (m Matrix3D) CoordinateToIndex(i, j, k int) int {
-	rows := len(m.data)
-	cols := len(m.data[0])
-	return i*cols*rows + j*cols + k
+	return k*m.q*m.q + j*m.q + i
 }
 
 func (m Matrix3D) IndexToCoordinate(index int) []int {

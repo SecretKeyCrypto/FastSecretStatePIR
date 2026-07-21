@@ -357,6 +357,9 @@ static std::vector<std::vector<int>> RME2D(const std::vector<int>& msg,
 
 // ─── 2D Lifted Reed-Solomon encoding ─────────────────────────────────────────
 //
+// This implementation is retained for future work and standalone experiments,
+// but is not selected by the current RMEncoding command protocol.
+//
 // Good-monomial condition for LRS(q, d) over F_q (prime q, 1 ≤ d ≤ q-1):
 //   A monomial x^a y^b is "good" iff
 //     (i)  0 ≤ a < d  and  0 ≤ b < d
@@ -371,7 +374,8 @@ static std::vector<std::vector<int>> RME2D(const std::vector<int>& msg,
 //
 // Message size: M = d² − max(0, 2d−q).   Rate → 1 as d → q-1.
 
-static std::vector<std::pair<int,int>> goodMonomials2D(int q, int d) {
+[[maybe_unused]] static std::vector<std::pair<int,int>>
+goodMonomials2D(int q, int d) {
     std::vector<std::pair<int,int>> G;
     G.reserve(d * d);
     for (int a = 0; a < d; ++a)
@@ -382,10 +386,11 @@ static std::vector<std::pair<int,int>> goodMonomials2D(int q, int d) {
 }
 
 // msg[i] = coefficient of the i-th good monomial (in the order returned by
-// goodMonomials2D).  Encoding = evaluate f(x,y) = Σ c[a][b] x^a y^b at all
-// (x,y) ∈ F_q².  Uses standard-basis Newton evaluation (no Gaussian elim).
+// goodMonomials2D). Encoding evaluates f(x,y) = Σ c[a][b] x^a y^b at all
+// (x,y) ∈ F_q². Uses standard-basis Newton evaluation (no Gaussian elim).
 
-static std::vector<std::vector<int>> LRSE2D(const std::vector<int>& msg, int q, int d) {
+[[maybe_unused]] static std::vector<std::vector<int>>
+LRSE2D(const std::vector<int>& msg, int q, int d) {
     auto G = goodMonomials2D(q, d);
     assert((int)msg.size() == (int)G.size());
 
@@ -402,14 +407,13 @@ static std::vector<std::vector<int>> LRSE2D(const std::vector<int>& msg, int q, 
         ypow[0] = 1;
         for (int b = 1; b < d; ++b) ypow[b] = ypow[b-1] * y % q;
 
-        // A[a] = Σ_b c[a][b] · y^b  (coefficient of x^a in P_y(x))
-        // Bad entries in c are 0, so no explicit skip needed.
+        // A[a] = Σ_b c[a][b] · y^b (coefficient of x^a in P_y(x)).
         std::vector<long long> A(d, 0);
         for (int a = 0; a < d; ++a)
             for (int b = 0; b < d; ++b)
                 A[a] = (A[a] + c[a][b] * ypow[b]) % q;
 
-        // Evaluate P_y(x) = A[0] + A[1]x + ... + A[d-1]x^{d-1} at x=0..q-1.
+        // Evaluate P_y(x) at x=0,...,q-1.
         std::vector<int> row(q);
         evalPolyNewton(A, d - 1, q, row);
         for (int x = 0; x < q; ++x) cw[x][y] = row[x];
@@ -522,27 +526,15 @@ int main() {
         auto msg = readMessageCSV(inp);
         int n = (int)msg.size();
 
-        if (m == 4) {
-            // 2D Lifted RS: find smallest d with d²−max(0,2d−q) ≥ n
-            int d = 1;
-            while ((int)goodMonomials2D(q, d).size() < n) ++d;
-            if (d * k + 1 >= q)
-                throw std::runtime_error("parameters violate d*k+1 < q constraint");
-            auto G = goodMonomials2D(q, d);
-            std::uniform_int_distribution<int> dist(0, q-1);
-            while ((int)msg.size() < (int)G.size()) msg.push_back(dist(rng));
-            writeCSV2D(outp, LRSE2D(msg, q, d));
-        } else {
-            int d = findSmallestD(n, m);
-            if (d * k + 1 >= q)
-                throw std::runtime_error("parameters violate d*k+1 < q constraint");
-            int N = binomial(m + d, d);
-            std::uniform_int_distribution<int> dist(0, q-1);
-            while ((int)msg.size() < N) msg.push_back(dist(rng));
-            if (m == 2) { writeCSV2D(outp, RME2D(msg, q, d)); }
-            else if (m == 3) { writeCSV3D(outp, RME3D(msg, q, d)); }
-            else throw std::runtime_error("unsupported m=" + std::to_string(m));
-        }
+        int d = findSmallestD(n, m);
+        if (d * k + 1 >= q)
+            throw std::runtime_error("parameters violate d*k+1 < q constraint");
+        int N = binomial(m + d, d);
+        std::uniform_int_distribution<int> dist(0, q-1);
+        while ((int)msg.size() < N) msg.push_back(dist(rng));
+        if (m == 2) { writeCSV2D(outp, RME2D(msg, q, d)); }
+        else if (m == 3) { writeCSV3D(outp, RME3D(msg, q, d)); }
+        else throw std::runtime_error("unsupported m=" + std::to_string(m));
 
         std::cout << '\n'; std::cout.flush();
     }

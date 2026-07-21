@@ -20,6 +20,11 @@ func BenchmarkEncode(b *testing.B) {
 	q := 31
 	k := 4
 	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
+	b.Cleanup(func() {
+		if err := pir.Close(); err != nil {
+			b.Error(err)
+		}
+	})
 
 	pir.Gen()
 	input := "../input/db.csv"
@@ -32,7 +37,9 @@ func BenchmarkEncode(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		pir.Encode(input, output)
+		if _, err := pir.Encode(input, output); err != nil {
+			b.Fatal(err)
+		}
 		duration := time.Since(start)
 		totalDuration += duration
 	}
@@ -111,7 +118,7 @@ func BenchmarkGenerateQuery(b *testing.B) {
 				target := rng.Intn(p.q * p.q)
 				start := time.Now()
 				points := utils.GenerateCurvePoints(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -134,7 +141,7 @@ func BenchmarkGenerate3DQuery(b *testing.B) {
 				target := rng.Intn(int(math.Pow(float64(p.q), 3)))
 				start := time.Now()
 				points := utils.GenerateCurvePoints3D(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -158,15 +165,15 @@ func BenchmarkGenerate4DQuery(b *testing.B) {
 		target := rng.Intn(int(math.Pow(float64(q), float64(m))))
 		start := time.Now()
 		points := utils.GenerateCurvePoints4D(k, q, target)
-		pir.PrepareQuerySequence(points)
+		pir.PrepareQuerySequenceWithNoise(points, 0)
 		total += time.Since(start)
 	}
 	b.StopTimer()
 	fmt.Printf("Average time per generate 4D query: %v, b.N=%d\n", total/time.Duration(b.N), b.N)
 }
 
-// BenchmarkGenerateQueryLifted benchmarks the full PLDN query generation for the
-// Lifted RS construction: curve points + noise injection + permutation + shuffle.
+// BenchmarkGenerateQueryLifted benchmarks full query generation: curve points,
+// dummy-position injection, permutation, and shuffle.
 // noiseCount = security parameter λ (paper uses L - ℓ > λ, here λ = 128).
 func BenchmarkGenerateQueryLifted(b *testing.B) {
 	const noiseCount = 128
@@ -188,7 +195,7 @@ func BenchmarkGenerateQueryLifted(b *testing.B) {
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			fmt.Printf("  [%s] avg PLDN query gen (noise=%d): %v\n", p.label, noiseCount, total/time.Duration(b.N))
+			fmt.Printf("  [%s] avg query gen (noise=%d): %v\n", p.label, noiseCount, total/time.Duration(b.N))
 		})
 	}
 }
@@ -199,58 +206,7 @@ func BenchmarkGenerateQueryLifted(b *testing.B) {
 //
 // *************************************************************************************
 
-func BenchmarkDecodingLargeRecorddQuery(b *testing.B) {
-	q := 4093
-	k := 3
-	m := 2
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
-	pir.Gen()
-
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var total time.Duration
-	// Record size 100 KB; each slice stores log2(q) ≈ 12 bits.
-	mockResponse := make([]int, int(100*math.Pow(2, 10)/1.5))
-	for i := range mockResponse {
-		mockResponse[i] = rng.Intn(q)
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		target := rng.Intn(int(math.Pow(float64(q), float64(m))))
-		start := time.Now()
-		points := utils.GenerateCurvePoints(k, q, target)
-		query := pir.PrepareQuerySequence(points)
-		pir.Decode(mockResponse, query)
-		total += time.Since(start)
-	}
-	b.StopTimer()
-	fmt.Printf("Average time per Decoding 100KB query: %v, b.N=%d\n", total/time.Duration(b.N), b.N)
-}
-
-func BenchmarkDecoding3DQuery(b *testing.B) {
-	q := 7919
-	k := 5
-	m := 3
-	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(m)})
-	pir.Gen()
-
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	var total time.Duration
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		target := rng.Intn(int(math.Pow(float64(q), float64(m))))
-		points := utils.GenerateCurvePoints3D(k, q, target)
-		query := pir.PrepareQuerySequence(points)
-		start := time.Now()
-		pir.Decode([]int{q - 1}, query)
-		total += time.Since(start)
-	}
-	b.StopTimer()
-	fmt.Printf("Average time per Decoding 3D query: %v, b.N=%d\n", total/time.Duration(b.N), b.N)
-}
-
-// BenchmarkDecodingLifted benchmarks the PLDN decode path where the server returns
+// BenchmarkDecodingLifted benchmarks decoding where the server returns
 // individual values at the q-1 real curve positions (not a single sum).
 func BenchmarkDecodingLifted(b *testing.B) {
 	for _, p := range liftedRSParams2D {
@@ -277,7 +233,7 @@ func BenchmarkDecodingLifted(b *testing.B) {
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			fmt.Printf("  [%s] avg PLDN decode: %v\n", p.label, total/time.Duration(b.N))
+			fmt.Printf("  [%s] avg decode: %v\n", p.label, total/time.Duration(b.N))
 		})
 	}
 }
@@ -305,7 +261,7 @@ func BenchmarkQueryGen2D(b *testing.B) {
 				target := rng.Intn(p.q * p.q)
 				start := time.Now()
 				points := utils.GenerateCurvePoints(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -314,9 +270,7 @@ func BenchmarkQueryGen2D(b *testing.B) {
 	}
 }
 
-// BenchmarkDecode2D measures just the decode step for 2D databases:
-// given a mock server sum, subtract the PRF masks and recover the record value.
-// Uses a single-slice response (one integer mod q from the server).
+// BenchmarkDecode2D measures individual-value decoding for 2D databases.
 func BenchmarkDecode2D(b *testing.B) {
 	for _, p := range onlineParams2D {
 		p := p
@@ -324,17 +278,19 @@ func BenchmarkDecode2D(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(2)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 
 			// Pre-generate a query so decode has a realistic query slice to work with.
 			points := utils.GenerateCurvePoints(p.t, p.q, rng.Intn(p.q*p.q))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.Decode(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -373,7 +329,7 @@ func BenchmarkQueryGenPrime2D_t7(b *testing.B) {
 				target := rng.Intn(p.q * p.q)
 				start := time.Now()
 				points := utils.GenerateCurvePoints(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -390,16 +346,18 @@ func BenchmarkDecodePrime2D_t7(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(2)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 
 			points := utils.GenerateCurvePoints(p.t, p.q, rng.Intn(p.q*p.q))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.Decode(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -442,7 +400,7 @@ func BenchmarkQueryGenGF2n2D(b *testing.B) {
 				target := rng.Intn(q * q)
 				start := time.Now()
 				points := utils.GenerateCurvePointsGF2n(gf, p.t, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -451,8 +409,7 @@ func BenchmarkQueryGenGF2n2D(b *testing.B) {
 	}
 }
 
-// BenchmarkDecodeGF2n2D measures decode for 2D RM over GF(2^n):
-// XOR the PRF masks over q−1 positions, then XOR with the server sum.
+// BenchmarkDecodeGF2n2D measures individual-value decoding over GF(2^n).
 func BenchmarkDecodeGF2n2D(b *testing.B) {
 	for _, p := range gf2nParams2D {
 		p := p
@@ -462,17 +419,19 @@ func BenchmarkDecodeGF2n2D(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(q), K: uint8(p.t), M: uint8(2)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(q)}
 
 			// Pre-generate a realistic query (q−1 permuted positions).
 			points := utils.GenerateCurvePointsGF2n(gf, p.t, rng.Intn(q*q))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.DecodeGF2n(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -509,7 +468,7 @@ func BenchmarkQueryGenPrime3D_t7(b *testing.B) {
 				target := rng.Intn(dbSize)
 				start := time.Now()
 				points := utils.GenerateCurvePoints3D(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -525,17 +484,19 @@ func BenchmarkDecodePrime3D_t7(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(3)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 			dbSize := p.q * p.q * p.q
 
 			points := utils.GenerateCurvePoints3D(p.t, p.q, rng.Intn(dbSize))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.Decode(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -574,7 +535,7 @@ func BenchmarkQueryGenGF2n3D(b *testing.B) {
 				target := rng.Intn(dbSize)
 				start := time.Now()
 				points := utils.GenerateCurvePointsGF2n3D(gf, p.t, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -592,17 +553,19 @@ func BenchmarkDecodeGF2n3D(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(q), K: uint8(p.t), M: uint8(3)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(q)}
 			dbSize := q * q * q
 
 			points := utils.GenerateCurvePointsGF2n3D(gf, p.t, rng.Intn(dbSize))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.DecodeGF2n(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -648,7 +611,7 @@ func BenchmarkQueryGen2D_t8(b *testing.B) {
 				} else {
 					points = utils.GenerateCurvePoints(p.t, p.q, target)
 				}
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -669,7 +632,6 @@ func BenchmarkDecode2D_t8(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(2)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 
 			var points []int
 			if p.gf {
@@ -677,16 +639,21 @@ func BenchmarkDecode2D_t8(b *testing.B) {
 			} else {
 				points = utils.GenerateCurvePoints(p.t, p.q, rng.Intn(p.q*p.q))
 			}
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
 				if p.gf {
-					pir.DecodeGF2n(mockSum, query)
+					if _, err := pir.Decode(result); err != nil {
+						b.Fatal(err)
+					}
 				} else {
-					pir.Decode(mockSum, query)
+					if _, err := pir.Decode(result); err != nil {
+						b.Fatal(err)
+					}
 				}
 				total += time.Since(start)
 			}
@@ -734,7 +701,7 @@ func BenchmarkQueryGen3D_t8(b *testing.B) {
 				} else {
 					points = utils.GenerateCurvePoints3D(p.t, p.q, target)
 				}
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -755,7 +722,6 @@ func BenchmarkDecode3D_t8(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(3)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 			dbSize := p.q * p.q * p.q
 
 			var points []int
@@ -764,16 +730,21 @@ func BenchmarkDecode3D_t8(b *testing.B) {
 			} else {
 				points = utils.GenerateCurvePoints3D(p.t, p.q, rng.Intn(dbSize))
 			}
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
 				if p.gf {
-					pir.DecodeGF2n(mockSum, query)
+					if _, err := pir.Decode(result); err != nil {
+						b.Fatal(err)
+					}
 				} else {
-					pir.Decode(mockSum, query)
+					if _, err := pir.Decode(result); err != nil {
+						b.Fatal(err)
+					}
 				}
 				total += time.Since(start)
 			}
@@ -1089,9 +1060,9 @@ func BenchmarkDecode3D_t6(b *testing.B) {
 	}
 }
 
-// ─── PLDN m=2 benchmarks ─────────────────────────────────────────────────────
+// ─── LiftedRS m=2 benchmarks ─────────────────────────────────────────────────────
 
-var paramsPLDN2D = []struct {
+var paramsLiftedRS2D = []struct {
 	q, t  int
 	gf    bool
 	label string
@@ -1111,9 +1082,9 @@ var paramsPLDN2D = []struct {
 	{1048573, 5, false, "prime q=1048573(2^20-3)  m=2 bw=1048572 t=5"},
 }
 
-func BenchmarkQueryGenPLDN2D(b *testing.B) {
+func BenchmarkQueryGenLiftedRS2D(b *testing.B) {
 	const noiseCount = 128
-	for _, p := range paramsPLDN2D {
+	for _, p := range paramsLiftedRS2D {
 		p := p
 		b.Run(p.label, func(b *testing.B) {
 			var gf *utils.GF2n
@@ -1145,9 +1116,9 @@ func BenchmarkQueryGenPLDN2D(b *testing.B) {
 	}
 }
 
-func BenchmarkDecodePLDN2D(b *testing.B) {
+func BenchmarkDecodeLiftedRS2D(b *testing.B) {
 	const noiseCount = 128
-	for _, p := range paramsPLDN2D {
+	for _, p := range paramsLiftedRS2D {
 		p := p
 		b.Run(p.label, func(b *testing.B) {
 			var gf *utils.GF2n
@@ -1199,9 +1170,9 @@ func BenchmarkDecodePLDN2D(b *testing.B) {
 	}
 }
 
-// ─── PLDN m=3, q=2^13, t=7 ───────────────────────────────────────────────────
+// ─── LiftedRS m=3, q=2^13, t=7 ───────────────────────────────────────────────────
 
-var paramsPLDN3D_q13_t7 = []struct {
+var paramsLiftedRS3D_q13_t7 = []struct {
 	q, t  int
 	gf    bool
 	label string
@@ -1210,9 +1181,9 @@ var paramsPLDN3D_q13_t7 = []struct {
 	{8192, 7, true, "GF(2^13) q=8192    m=3 bw=8191    t=7"},
 }
 
-func BenchmarkQueryGenPLDN3D_q13_t7(b *testing.B) {
+func BenchmarkQueryGenLiftedRS3D_q13_t7(b *testing.B) {
 	const noiseCount = 128
-	for _, p := range paramsPLDN3D_q13_t7 {
+	for _, p := range paramsLiftedRS3D_q13_t7 {
 		p := p
 		b.Run(p.label, func(b *testing.B) {
 			var gf *utils.GF2n
@@ -1245,9 +1216,9 @@ func BenchmarkQueryGenPLDN3D_q13_t7(b *testing.B) {
 	}
 }
 
-func BenchmarkDecodePLDN3D_q13_t7(b *testing.B) {
+func BenchmarkDecodeLiftedRS3D_q13_t7(b *testing.B) {
 	const noiseCount = 128
-	for _, p := range paramsPLDN3D_q13_t7 {
+	for _, p := range paramsLiftedRS3D_q13_t7 {
 		p := p
 		b.Run(p.label, func(b *testing.B) {
 			var gf *utils.GF2n
@@ -1304,9 +1275,10 @@ func BenchmarkDecodePLDN3D_q13_t7(b *testing.B) {
 
 // TestConcRMDecode verifies the full φ⁻¹ + outer-Lagrange decode pipeline.
 // Two sub-tests per field size:
-//   "identity" — db[p]=p; PhiInv must recover ψ(zⱼ) exactly.
-//   "linear"   — db[p]=a·p⊕b; exercises a nontrivial (but degree-1) database so
-//                that f∘ψ still has degree t and the t+1 outer Lagrange is exact.
+//
+//	"identity" — db[p]=p; PhiInv must recover ψ(zⱼ) exactly.
+//	"linear"   — db[p]=a·p⊕b; exercises a nontrivial (but degree-1) database so
+//	             that f∘ψ still has degree t and the t+1 outer Lagrange is exact.
 func TestConcRMDecode(t *testing.T) {
 	cases := []struct{ n, degree int }{
 		{8, 3},
@@ -1343,7 +1315,9 @@ func TestConcRMDecode(t *testing.T) {
 				}
 
 				// identity database: db[p] = p
-				if got := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return p }), aux); got != target {
+				if got, err := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return p }), aux); err != nil {
+					t.Fatalf("identity trial %d: DecodeConcRM returned error: %v", trial, err)
+				} else if got != target {
 					t.Errorf("identity trial %d: want %d got %d (n=%d t=%d)", trial, target, got, c.n, c.degree)
 				}
 
@@ -1351,7 +1325,9 @@ func TestConcRMDecode(t *testing.T) {
 				a := uint32(rng.Intn(q-1)) + 1 // nonzero
 				b := uint32(rng.Intn(q))
 				want := gf.Mul(a, target) ^ b
-				if got := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return gf.Mul(a, p) ^ b }), aux); got != want {
+				if got, err := utils.DecodeConcRM(gf2, buildBlocks(func(p uint32) uint32 { return gf.Mul(a, p) ^ b }), aux); err != nil {
+					t.Fatalf("linear trial %d: DecodeConcRM returned error: %v", trial, err)
+				} else if got != want {
 					t.Errorf("linear trial %d: want %d got %d (n=%d t=%d)", trial, want, got, c.n, c.degree)
 				}
 			}
@@ -1362,28 +1338,28 @@ func TestConcRMDecode(t *testing.T) {
 // ─── Concatenated RM m=3 benchmarks (Table 2 last column) ───────────────────
 //
 // Parameters follow Fig. 4 with d = q-1, e = 2:
-//   r = q,  s = (q-1)·t + 1,  ℓ = s·q  (total query positions)
+//   r = q,  s = (q-1)·t + 1,  ℓ = s·q  (genuine query positions)
 //
 // Query-gen timing includes:
 //   1. Sampling m degree-t polynomials over GF(q²)          O(m·t)
 //   2. Evaluating them at s points in GF(q²)                O(m·t·s)
-//   3. Streaming all ℓ = s·q query indices (checksum only)  O(m·s·q)  ← dominates
-//   4. Lagrange weight precomp for t+1 points only          O(t²)     ← negligible (µs)
+//   3. Streaming all L = ℓ + 128 query indices (checksum only)  O(m·s·q)  ← dominates
+//   4. Subquadratic Lagrange weight precomputation for all s points
 //
-// ψ has degree t, so t+1 evaluations suffice for unique interpolation.
-// Using all s evaluations (O(s²) precomp) is unnecessary.
+// The restricted RM codeword has degree at most d*t, so all s=d*t+1
+// evaluations are required for general degree-d codewords.
 //
 // Decode timing:
-//   1. φ⁻¹ step (O(q) scalar-GF(q²) muls per block, t+1 blocks)  O(q·t)  ← dominates
-//   2. Outer Lagrange weighted sum over t+1 points                 O(t)
+//   1. φ⁻¹ step (O(q) scalar-GF(q²) muls per block, s blocks)  O(q·s)  ← dominates
+//   2. Outer Lagrange weighted sum over s points                  O(s)
 
 var paramsConcRM3D = []struct {
 	n, t  int
 	label string
 }{
 	// Smallest Table 2 entry — benchmarkable in reasonable time (~seconds).
-	{13, 7, "GF(2^13) q=8192  m=3 t=7  s=57344  ℓ=470M"},
-	// Larger entries — query gen dominated by O(s²) precomp and O(s·q) output.
+	{13, 7, "GF(2^13) q=8192  m=3 t=7  s=57338  ℓ=470M"},
+	// Larger entries — query gen is dominated by the O(s·q) projected output.
 	{14, 6, "GF(2^14) q=16384 m=3 t=6  s=98299  ℓ=1.6B"},
 	{16, 5, "GF(2^16) q=65536 m=3 t=5  s=327676 ℓ=21.5B"},
 	{16, 6, "GF(2^16) q=65536 m=3 t=6  s=393211 ℓ=25.8B"},
@@ -1397,7 +1373,8 @@ var paramsConcRM3D = []struct {
 }
 
 // BenchmarkQueryGenConcRM3D measures Conc. RM query generation.
-// Includes: GF(q²) evaluations, φ-projection checksum, and O(t²) Lagrange precomp.
+// Includes GF(q²) evaluations, the φ-projection checksum, and subquadratic
+// product-tree Lagrange-weight precomputation.
 func BenchmarkQueryGenConcRM3D(b *testing.B) {
 	for _, p := range paramsConcRM3D {
 		p := p
@@ -1413,21 +1390,30 @@ func BenchmarkQueryGenConcRM3D(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				target := rng.Intn(dbSize)
 				start := time.Now()
-				_, _, _ = utils.GenerateConcCurvePoints3D(gf2, p.t, target)
+				_, _, _ = utils.GenerateConcCurvePoints3D(gf2, p.t, q-1, target)
 				total += time.Since(start)
 			}
 			b.StopTimer()
 			s := (q-1)*p.t + 1
 			ell := s * q
-			fmt.Printf("  %-65s query gen: %v  (s=%d ℓ=%d)\n", p.label, total/time.Duration(b.N), s, ell)
+			fmt.Printf("  %-65s query gen: %v  (s=%d ℓ=%d L=%d noise=128)\n", p.label, total/time.Duration(b.N), s, ell, ell+128)
 		})
 	}
 }
 
 // BenchmarkDecodeConcRM3D measures the full Conc. RM decode:
-// φ⁻¹ (O(q·(t+1)) scalar-GF(q²) ops) + outer Lagrange at 0 (O(t) GF(q²) ops).
+// φ⁻¹ (O(q·s) scalar-GF(q²) ops) + outer Lagrange at 0 (O(s) GF(q²) ops).
 func BenchmarkDecodeConcRM3D(b *testing.B) {
-	for _, p := range paramsConcRM3D {
+	// Use smaller, explicit degrees here: materializing responses for the
+	// d=q-1 table parameters would require hundreds of millions of values.
+	params := []struct {
+		n, t, d int
+		label   string
+	}{
+		{4, 2, 3, "GF(2^4) q=16 m=3 t=2 d=3"},
+		{8, 3, 5, "GF(2^8) q=256 m=3 t=3 d=5"},
+	}
+	for _, p := range params {
 		p := p
 		b.Run(p.label, func(b *testing.B) {
 			gf := utils.NewGF2n(p.n)
@@ -1435,19 +1421,24 @@ func BenchmarkDecodeConcRM3D(b *testing.B) {
 			q := int(gf.Q)
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-			// Precompute outer Lagrange weights for t+1 interpolation points.
-			zvals := gf2.RandDistinctNonzero(p.t + 1)
+			s := p.d*p.t + 1
+			// Precompute outer Lagrange weights for all s interpolation points.
+			zvals := gf2.RandDistinctNonzero(s)
 			weights := gf2.LagrangeWeightsAt0(zvals)
 			aux := utils.ConcAux{LagrangeWeights: weights, ZVals: zvals}
 
-			// Mock server responses: q values per block, t+1 blocks.
-			yBlocks := make([][]uint32, p.t+1)
+			// Mock server responses: r=d+1 values per block, s blocks.
+			r := p.d + 1
+			wValues := make([][]uint32, s)
+			yBlocks := make([][]uint32, s)
 			for j := range yBlocks {
-				yBlocks[j] = make([]uint32, q)
+				wValues[j] = gf2.RandDistinctBaseElements(r)
+				yBlocks[j] = make([]uint32, r)
 				for w := range yBlocks[j] {
 					yBlocks[j][w] = uint32(rng.Intn(q))
 				}
 			}
+			aux.WValues = wValues
 
 			var total time.Duration
 			b.ResetTimer()
@@ -1457,8 +1448,8 @@ func BenchmarkDecodeConcRM3D(b *testing.B) {
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			fmt.Printf("  %-65s decode:    %v  (φ⁻¹+Lagrange, t+1=%d blocks × q=%d)\n",
-				p.label, total/time.Duration(b.N), p.t+1, q)
+			fmt.Printf("  %-65s decode:    %v  (φ⁻¹+Lagrange, s=%d blocks × r=%d)\n",
+				p.label, total/time.Duration(b.N), s, r)
 		})
 	}
 }
@@ -1478,7 +1469,7 @@ func BenchmarkQueryGen3D(b *testing.B) {
 				target := rng.Intn(int(math.Pow(float64(p.q), 3)))
 				start := time.Now()
 				points := utils.GenerateCurvePoints3D(p.t, p.q, target)
-				pir.PrepareQuerySequence(points)
+				pir.PrepareQuerySequenceWithNoise(points, 0)
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -1495,16 +1486,18 @@ func BenchmarkDecode3D(b *testing.B) {
 			pir := NewPIR(Params{Q: uint64(p.q), K: uint8(p.t), M: uint8(3)})
 			pir.Gen()
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-			mockSum := []int{rng.Intn(p.q)}
 
 			points := utils.GenerateCurvePoints3D(p.t, p.q, rng.Intn(int(math.Pow(float64(p.q), 3))))
-			query := pir.PrepareQuerySequence(points)
+			query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+			result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
 
 			var total time.Duration
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				start := time.Now()
-				pir.Decode(mockSum, query)
+				if _, err := pir.Decode(result); err != nil {
+					b.Fatal(err)
+				}
 				total += time.Since(start)
 			}
 			b.StopTimer()
@@ -1513,7 +1506,7 @@ func BenchmarkDecode3D(b *testing.B) {
 	}
 }
 
-// BenchmarkClientComputation is the legacy single-point benchmark kept for comparison.
+// BenchmarkClientComputation measures combined query generation and decoding.
 func BenchmarkClientComputation(b *testing.B) {
 	q := 7919
 	k := 5
@@ -1529,8 +1522,11 @@ func BenchmarkClientComputation(b *testing.B) {
 		target := rng.Intn(q * q)
 		start := time.Now()
 		points := utils.GenerateCurvePoints3D(k, q, target)
-		query := pir.PrepareQuerySequence(points)
-		pir.Decode([]int{q - 1}, query)
+		query, realPositions := pir.PrepareQuerySequenceWithNoise(points, 0)
+		result := QueryResult{Values: make([]int, len(query)), Query: query, RealPositions: realPositions}
+		if _, err := pir.Decode(result); err != nil {
+			b.Fatal(err)
+		}
 		total += time.Since(start)
 	}
 	b.StopTimer()
@@ -1555,7 +1551,9 @@ func BenchmarkCodewordPermutation(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		p.permuteAndEncryptMatrix(0, &Matrix2D{data: rmc, q: q})
+		if err := p.permuteAndEncryptMatrix(0, &Matrix2D{data: rmc, q: q}); err != nil {
+			b.Fatal(err)
+		}
 		total += time.Since(start)
 	}
 	b.StopTimer()
@@ -1567,46 +1565,66 @@ func BenchmarkCodewordPermutation(b *testing.B) {
 //	Functional Tests
 //
 // *************************************************************************************
-func TestEndToEnd(b *testing.T) {
+func TestLiftedRSWithRMEncodingEndToEnd(t *testing.T) {
 	q := 31
 	k := 2
 	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
+	t.Cleanup(func() {
+		if err := pir.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	pir.Gen()
 	input := "../input/db.csv"
 	output := "../output/matrix.csv"
 	FakeDB(q, 6, input)
 
-	pir.Encode(input, output)
-	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
+	if _, err := pir.Encode(input, output); err != nil {
+		t.Fatal(err)
+	}
+	ori, _ := utils.ReadMatrixFromFile(rmEncodingIntermediate)
 
 	for i := 0; i < q*q; i++ {
-		sum, query := pir.QueryLocal(i, []string{output})
-		dec := pir.Decode(sum, query)
+		values, query, realPositions := pir.QueryLocalLiftedRS(i, output)
+		dec, err := pir.Decode(QueryResult{Values: values, Query: query, RealPositions: realPositions})
+		if err != nil {
+			t.Fatal(err)
+		}
 		row, col := utils.SingleIndexToRowCol(q, i)
 		if ori[row][col] != dec[0] {
-			panic("Decoding ERROR")
+			t.Fatalf("decoded value %d at index %d, want %d", dec[0], i, ori[row][col])
 		}
 	}
 }
 
-func TestEndToEndFromConfigKey(b *testing.T) {
+func TestLiftedRSWithRMEncodingEndToEndFromConfigKey(t *testing.T) {
 	q := 31
 	k := 2
 	pir := NewPIR(Params{Q: uint64(q), K: uint8(k), M: uint8(2)})
+	t.Cleanup(func() {
+		if err := pir.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	pir.GenFromConfig("../config.json")
 	input := "../input/example_db.csv"
 	output := "../output/example_matrix.csv"
 	FakeDB(q, 10, input)
 
-	pir.Encode(input, output)
-	ori, _ := utils.ReadMatrixFromFile("../output/inter.csv")
+	if _, err := pir.Encode(input, output); err != nil {
+		t.Fatal(err)
+	}
+	ori, _ := utils.ReadMatrixFromFile(rmEncodingIntermediate)
 
 	for i := 0; i < q*q; i++ {
-		sum, query := pir.QueryLocal(i, []string{output})
-		dec := pir.Decode(sum, query)
+		values, query, realPositions := pir.QueryLocalLiftedRS(i, output)
+		dec, err := pir.Decode(QueryResult{Values: values, Query: query, RealPositions: realPositions})
+		if err != nil {
+			t.Fatal(err)
+		}
 		row, col := utils.SingleIndexToRowCol(q, i)
 		if ori[row][col] != dec[0] {
-			panic("Decoding ERROR")
+			t.Fatalf("decoded value %d at index %d, want %d", dec[0], i, ori[row][col])
 		}
 	}
 }
@@ -1624,8 +1642,10 @@ func TestQueryFromServer(b *testing.T) {
 	}
 
 	for i := 0; i < q*q; i++ {
-		sum, dec_sum := pir.Query(i, utils.GetParameterConfig(configFilename).ServerUrl)
-		pir.Decode(sum, dec_sum)
+		result := pir.Query(i, utils.GetParameterConfig(configFilename).ServerUrl)
+		if _, err := pir.Decode(result); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

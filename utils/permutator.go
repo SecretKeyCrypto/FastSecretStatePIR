@@ -4,7 +4,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"fmt"
 	"math"
+	"sync"
 )
 
 const (
@@ -20,6 +22,7 @@ var (
 )
 
 type Permutator struct {
+	mu     *sync.Mutex
 	tweak  []byte
 	maxNum int
 	radix  int
@@ -46,6 +49,9 @@ type cbcMode interface {
 }
 
 func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
+	if maxNum < 1 {
+		return Permutator{}, fmt.Errorf("permutation domain size must be positive, got %d", maxNum)
+	}
 	radix, maxLen, _ := findBestRadixAndLength(maxNum)
 
 	var newPermutator Permutator
@@ -54,7 +60,10 @@ func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
 		tweak = tweak[:maxLen]
 	}
 
-	aesBlock, _ := aes.NewCipher(key)
+	aesBlock, err := aes.NewCipher(key)
+	if err != nil {
+		return Permutator{}, fmt.Errorf("create permutation cipher: %w", err)
+	}
 
 	cbcEncryptor := cipher.NewCBCEncrypter(aesBlock, ivZero)
 
@@ -88,6 +97,7 @@ func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
 	lenQ := t + b + 1 + numPad
 
 	newPermutator.maxNum = maxNum
+	newPermutator.mu = &sync.Mutex{}
 	newPermutator.radix = radix
 	newPermutator.maxLen = maxLen
 	newPermutator.cbcEncryptor = cbcEncryptor
@@ -107,7 +117,7 @@ func NewPermutator(maxNum int, key, tweak []byte) (Permutator, error) {
 	return newPermutator, nil
 }
 
-func (p Permutator) Permute(X uint64) (uint64, error) {
+func (p *Permutator) Permute(X uint64) (uint64, error) {
 	var ret uint64
 	for {
 		ret = p.Encrypt(X)
@@ -118,7 +128,13 @@ func (p Permutator) Permute(X uint64) (uint64, error) {
 	}
 }
 
-func (p Permutator) Encrypt(X uint64) uint64 {
+func (p *Permutator) Encrypt(X uint64) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.encrypt(X)
+}
+
+func (p *Permutator) encrypt(X uint64) uint64 {
 	t := len(p.tweak)
 
 	PQ := p.PQ
@@ -188,11 +204,11 @@ func minLenByRadix(radix int) (minLen int) {
 	return
 }
 
-func (p Permutator) ReturnParameters() (int, int, int) {
+func (p *Permutator) ReturnParameters() (int, int, int) {
 	return p.maxNum, p.maxLen, p.radix
 }
 
-func (p Permutator) Revert(X uint64) (uint64, error) {
+func (p *Permutator) Revert(X uint64) (uint64, error) {
 	var ret uint64
 	for {
 		ret = p.Decrypt(X)
@@ -203,7 +219,13 @@ func (p Permutator) Revert(X uint64) (uint64, error) {
 	}
 }
 
-func (p Permutator) Decrypt(X uint64) uint64 {
+func (p *Permutator) Decrypt(X uint64) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.decrypt(X)
+}
+
+func (p *Permutator) decrypt(X uint64) uint64 {
 	PQ := p.PQ
 	buf_R := p.R
 	Q := PQ[blockSize:]
@@ -250,7 +272,7 @@ func (p Permutator) Decrypt(X uint64) uint64 {
 }
 
 // PRF as defined in the NIST spec is actually just AES-CBC-MAC, which is the last block of an AES-CBC encrypted ciphertext. Utilize the ciph function for the AES-CBC.
-func (p Permutator) prf(input []byte, output []byte) {
+func (p *Permutator) prf(input []byte, output []byte) {
 	p.cbcEncryptor.CryptBlocks(output, input)
 	// Reset IV to 0
 	p.cbcEncryptor.(cbcMode).SetIV(ivZero)
