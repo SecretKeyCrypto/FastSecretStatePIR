@@ -1,6 +1,9 @@
 package utils
 
-import "math/rand"
+import (
+	"fmt"
+	"math/rand"
+)
 
 // GFExt2Elem is an element a + b·β of GF(q²) = GF(q)[β]/(β²+β+C).
 type GFExt2Elem struct{ A, B uint32 }
@@ -9,8 +12,8 @@ type GFExt2Elem struct{ A, B uint32 }
 // Elements are (a, b) representing a + b·β, with β² = β + C.
 type GF2nExt2 struct {
 	Base           *GF2n
-	C              uint32         // irreducible constant; β² = β + C
-	BetaInvWeights []GFExt2Elem   // BetaInvWeights[w] = (β+w)⁻¹ for w ∈ Fq; used by PhiInv
+	C              uint32       // irreducible constant; β² = β + C
+	BetaInvWeights []GFExt2Elem // BetaInvWeights[w] = (β+w)⁻¹ for w ∈ Fq; used by PhiInv
 }
 
 // NewGF2nExt2 constructs GF(q²) as a degree-2 extension of GF(q).
@@ -127,10 +130,34 @@ func (g *GF2nExt2) Phi(e GFExt2Elem, w uint32) uint32 {
 
 // ConcAux holds precomputed auxiliary data produced during Conc. RM query generation.
 // LagrangeWeights[j] = λⱼ(0) = Πₖ≠ⱼ zₖ / Πₖ≠ⱼ(zₖ⊕zⱼ) in GF(q²).
-// These are precomputed in O(s²) and allow O(s) decode.
+// The main RMConc path precomputes them with the subquadratic
+// LagrangeWeightsAt0Fast routine. LagrangeWeightsAt0 remains available as the
+// O(s²) reference implementation. Either representation allows O(s) outer
+// interpolation during decode.
 type ConcAux struct {
 	LagrangeWeights []GFExt2Elem
 	ZVals           []GFExt2Elem
+	// FullOuterField reports that the outer blocks are evaluations at every
+	// nonzero element of GF(q²). In that case ZVals and LagrangeWeights are
+	// omitted: for degree at most q²-2, f(0) is the sum of those evaluations.
+	FullOuterField bool
+	// WValues[j] contains the r=d+1 base-field evaluation points used by
+	// the inner map for outer block j. It is nil when r=q, where the only
+	// possible set is the full base field and PhiInv uses its optimized path.
+	WValues [][]uint32
+}
+
+// NonzeroElementAt returns the index-th element in a deterministic enumeration
+// of GF(q²)*. Valid indices are 0 through q²-2. It lets full-outer-field
+// query generation stream the field without allocating or randomly sampling
+// all q²-1 elements.
+func (g *GF2nExt2) NonzeroElementAt(index int) GFExt2Elem {
+	q := int(g.Base.Q)
+	if index < 0 || index >= q*q-1 {
+		panic(fmt.Sprintf("nonzero GF(q²) element index %d outside [0,%d)", index, q*q-1))
+	}
+	encoded := index + 1
+	return GFExt2Elem{A: uint32(encoded % q), B: uint32(encoded / q)}
 }
 
 // ScalarMul returns e·a where a ∈ Fq, using two base-field multiplications.
@@ -153,6 +180,65 @@ func (g *GF2nExt2) PhiInv(yBlock []uint32) GFExt2Elem {
 		}
 	}
 	return acc
+}
+
+// PhiInvAt applies the manuscript's inner inverse map at arbitrary distinct
+// base-field evaluation points. It interpolates the unique degree-<r
+// polynomial through (wValues[h], yBlock[h]) and evaluates it at beta, which
+// represents reduction modulo the defining polynomial of GF(q²).
+func (g *GF2nExt2) PhiInvAt(yBlock, wValues []uint32) (GFExt2Elem, error) {
+	if len(yBlock) == 0 || len(yBlock) != len(wValues) {
+		return GFExt2Elem{}, fmt.Errorf("PhiInvAt requires equally sized nonempty value and evaluation-point slices, got %d and %d", len(yBlock), len(wValues))
+	}
+	seen := make(map[uint32]struct{}, len(wValues))
+	for i, w := range wValues {
+		if w >= g.Base.Q {
+			return GFExt2Elem{}, fmt.Errorf("PhiInvAt evaluation point %d is outside GF(q): %d >= %d", i, w, g.Base.Q)
+		}
+		if _, duplicate := seen[w]; duplicate {
+			return GFExt2Elem{}, fmt.Errorf("PhiInvAt evaluation point %d is duplicated", i)
+		}
+		seen[w] = struct{}{}
+	}
+
+	var result GFExt2Elem
+	for h, y := range yBlock {
+		if y >= g.Base.Q {
+			return GFExt2Elem{}, fmt.Errorf("PhiInvAt value %d is outside GF(q): %d >= %d", h, y, g.Base.Q)
+		}
+		numerator := g.One()
+		denominator := uint32(1)
+		for k, w := range wValues {
+			if k == h {
+				continue
+			}
+			// beta-w = beta+w in characteristic two.
+			numerator = g.Mul(numerator, GFExt2Elem{A: w, B: 1})
+			denominator = g.Base.Mul(denominator, wValues[h]^w)
+		}
+		weight := g.ScalarMul(numerator, g.Base.Inv(denominator))
+		result = g.Add(result, g.ScalarMul(weight, y))
+	}
+	return result, nil
+}
+
+// RandDistinctBaseElements samples count distinct elements of GF(q).
+func (g *GF2nExt2) RandDistinctBaseElements(count int) []uint32 {
+	q := int(g.Base.Q)
+	if count < 0 || count > q {
+		panic(fmt.Sprintf("cannot sample %d distinct elements from GF(%d)", count, q))
+	}
+	seen := make(map[uint32]struct{}, count)
+	values := make([]uint32, 0, count)
+	for len(values) < count {
+		value := uint32(rand.Intn(q))
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
 }
 
 // LagrangeWeightsAt0 precomputes λⱼ(0) for all j in O(s²).

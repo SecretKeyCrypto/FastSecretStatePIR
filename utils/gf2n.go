@@ -7,7 +7,7 @@ import (
 
 // GF2n represents the field GF(2^n) with log/exp table arithmetic.
 // Addition = XOR. Multiplication via discrete-log tables (O(1) per op).
-// Supported degrees n: 4, 8, 16, 17, 18, 20.
+// Supported degrees n: 4, 8, 12, 13, 14, 16, 17, 18, 20.
 type GF2n struct {
 	N   int      // extension degree
 	Q   uint32   // field size = 1 << N

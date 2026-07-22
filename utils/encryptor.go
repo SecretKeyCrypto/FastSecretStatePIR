@@ -4,19 +4,21 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
+	"fmt"
 	"math"
 )
 
 type Encryptor struct {
-	cipher     cipher.Block
-	q          uint64
-	maxModq    uint64
-	plaintext  []byte
-	ciphertext []byte
+	cipher  cipher.Block
+	q       uint64
+	maxModq uint64
 }
 
 func NewEncryptor(key []byte, q int) (Encryptor, error) {
 	var encryptor Encryptor
+	if q < 1 {
+		return encryptor, fmt.Errorf("mask modulus must be positive, got %d", q)
+	}
 
 	blockcipher, err := aes.NewCipher(key)
 
@@ -27,9 +29,6 @@ func NewEncryptor(key []byte, q int) (Encryptor, error) {
 	encryptor.cipher = blockcipher
 	encryptor.q = uint64(q)
 	encryptor.maxModq = (math.MaxUint64%encryptor.q + 1) % encryptor.q
-	encryptor.plaintext = make([]byte, aes.BlockSize)
-	encryptor.ciphertext = make([]byte, aes.BlockSize)
-
 	return encryptor, nil
 }
 
@@ -49,12 +48,14 @@ func (e Encryptor) EncryptSlice(slice, index, data int) int {
 }
 
 func (e Encryptor) EncryptPosition(slice, index int) int {
-	generatePlaintextFromIndex(slice, index, e.plaintext)
+	var plaintext [aes.BlockSize]byte
+	var ciphertext [aes.BlockSize]byte
+	generatePlaintextFromIndex(slice, index, plaintext[:])
 
-	e.cipher.Encrypt(e.ciphertext, e.plaintext)
+	e.cipher.Encrypt(ciphertext[:], plaintext[:])
 
-	A1 := binary.BigEndian.Uint64(e.ciphertext[:8])
-	A2 := binary.BigEndian.Uint64(e.ciphertext[8:])
+	A1 := binary.BigEndian.Uint64(ciphertext[:8])
+	A2 := binary.BigEndian.Uint64(ciphertext[8:])
 
 	// For demonstration, let's perform a modulus operation on A1 and A2 with q
 	q := uint64(e.q) // Example modulus

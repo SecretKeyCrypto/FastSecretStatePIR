@@ -48,19 +48,23 @@ function handle_request(req::HTTP.Request, A_sliced, q)
             if all(x -> isa(x, Number), data)
                 indices = map(Int, data)  # Convert to Int
                 for A in A_sliced
-                    result = sum_positions_single_index(q, A, indices)
-                    push!(results, result)
+                    valid_indices = [idx for idx in indices if idx > 0 && idx <= length(A)]
+                    if length(valid_indices) != length(indices)
+                        return HTTP.Response(400, "One or more requested indices are out of range")
+                    end
+                    values = [A[idx + 1] for idx in valid_indices]
+                    push!(results, values)
                 end
             else
-                HTTP.Response(400, "Invalid Request")
+                return HTTP.Response(400, "Invalid Request")
             end
 
             end_time = time_ns()
             elapsed_time_seconds = (end_time - start_time) / 1e9
             println("Request handled in $elapsed_time_seconds seconds")
 
-            # Return the list of results for each matrix
-            return HTTP.Response(200, JSON.json(Dict("sums" => results)))
+            # Return the list of values for each requested position
+            return HTTP.Response(200, JSON.json(Dict("values" => reduce(vcat, results))))
 
         catch e
             println("Error parsing JSON: ", e)

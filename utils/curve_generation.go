@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"math/big"
+	"fmt"
 	"math/rand"
 )
 
@@ -10,22 +10,9 @@ import (
 func EvaluatePolynomial(coeffs []int, x, q int) int {
 	result := 0
 	for k := len(coeffs) - 1; k >= 0; k-- {
-		result = (result*x+coeffs[k])%q
+		result = (result*x + coeffs[k]) % q
 	}
 	return result
-}
-
-func EvaluatePolynomialForLargeField(coeffs []int, x, q int) int {
-	bigQ := big.NewInt(int64(q))
-	bigX := big.NewInt(int64(x))
-	result := big.NewInt(int64(coeffs[len(coeffs)-1]))
-	for k := len(coeffs) - 2; k >= 0; k-- {
-		result.Mul(result, bigX)
-		result.Mod(result, bigQ)
-		result.Add(result, big.NewInt(int64(coeffs[k])))
-		result.Mod(result, bigQ)
-	}
-	return int(result.Int64())
 }
 
 // GenerateRandomPolynomialCoeffs generates a random degree-d polynomial over F_q
@@ -49,7 +36,7 @@ func buildDiffTable(coeffs []int, degree, q int) []int {
 	for x := 0; x <= degree; x++ {
 		v := coeffs[degree]
 		for k := degree - 1; k >= 0; k-- {
-			v = (v*x+coeffs[k]) % q
+			v = (v*x + coeffs[k]) % q
 		}
 		state[x] = v
 	}
@@ -128,40 +115,27 @@ func GenerateCurvePoints3D(degree, q, i int) []int {
 	return points
 }
 
-// ─── Concatenated-RM curve generation (Fig. 4 in the paper) ─────────────────
-//
-// Parameters: d = q-1 (RM degree for rate 1/m!), e = 2 (extension degree),
-//   r = d(e-1)+1 = q, s = dt+1 = (q-1)t+1, ℓ = s·q total query points.
-//
-// Query generation (QConc):
-//   1. Sample m degree-t polynomials ψₕ over GF(q²) with ψₕ(0) = iₕ.
-//   2. Sample s distinct nonzero z₁,…,zₛ ∈ GF(q²)*.
-//   3. For each j: evaluate ψₕ(zⱼ) ∈ GF(q²); project to q points in F_q^m
-//      via φ(a+bβ, w) = a ⊕ b⊗w for w = 0,1,…,q-1.
-//   4. Precompute Lagrange weights λⱼ(0) for all s z-values (O(s²)) since the
-//      codeword restricted to the curve, g = f∘ψ, has degree d·t and needs
-//      s = dt+1 evaluations to be uniquely determined at 0.
-//
-// Decode (DConc):
-//   For each of the s interpolation blocks, the server has returned q values
-//   yBlock[j][w] = db[φ(ψ(zⱼ), w)] for w ∈ Fq.
-//   Step 1 — φ⁻¹ (O(q) per block): recover uⱼ = g(zⱼ) ∈ GF(q²) via
-//     uⱼ = Σ_{w ∈ Fq} yBlock[j][w] · (β+w)⁻¹
-//   This is valid because Π_{v ∈ Fq}(β+v) = β^q+β = 1, so the Lagrange
-//   weights at point β for nodes Fq are simply (β+w)⁻¹ (precomputed once).
-//   Step 2 — outer Lagrange (O(s)): f(i) = g(0) = Σⱼ uⱼ · λⱼ(0).
-
 // GenerateConcCurvePoints3D generates the Conc. RM query for a 3D (m=3) database.
 // Returns (checksum, ℓ, ConcAux):
-//   - checksum: XOR of all ℓ query indices (prevents dead-code elimination without
-//     allocating ℓ elements, which is too large for large q).
-//   - ℓ: total number of query positions = s × q.
+//   - checksum: XOR of all L query indices (prevents dead-code elimination without
+//     allocating L elements, which is too large for large q).
+//   - ℓ: number of genuine query positions s×r, excluding 128 noise positions,
+//     where s=d*t+1 and r=d+1 for extension degree e=2. Thus L=ℓ+128.
 //   - ConcAux: Lagrange weights + z-values for decoding.
-func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, i int) (uint64, int, ConcAux) {
+func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, d, i int) (uint64, int, ConcAux) {
+	const noiseCount = 128
+
 	gf := gf2.Base
 	q := int(gf.Q)
-	s := (q-1)*t + 1 // s = dt+1 with d=q-1
-	ell := s * q     // ℓ = s·r, r=q
+	if t < 0 || d < 1 || d >= q {
+		panic(fmt.Sprintf("concatenated RM parameters require t >= 0 and 1 <= d <= q-1, got t=%d d=%d q=%d", t, d, q))
+	}
+	s := d*t + 1
+	r := d + 1
+	if s > q*q-1 {
+		panic(fmt.Sprintf("concatenated RM query needs %d distinct nonzero points, but GF(q^2) has only %d", s, q*q-1))
+	}
+	ell := s * r
 
 	// Decompose target into (x, y, z) in F_q^3.
 	x3D := i % q
@@ -176,20 +150,46 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, i int) (uint64, int, ConcAux) {
 		gf2.RandPolyWithValue(t, zero, GFExt2Elem{uint32(z3D), 0}),
 	}
 
-	// Sample s distinct nonzero z-values in GF(q²).
-	zvals := gf2.RandDistinctNonzero(s)
+	// The full-field case streams a deterministic enumeration. Besides avoiding
+	// coupon-collector sampling, it enables the sum decoder below.
+	fullOuterField := s == q*q-1
+	var zvals []GFExt2Elem
+	if !fullOuterField {
+		zvals = gf2.RandDistinctNonzero(s)
+	}
 
-	// Stream all ℓ query indices into a checksum (no allocation of the full slice).
+	// Stream all base and noisy query indices into a checksum (no allocation of the full slice).
 	q2 := q * q
+	q3 := q2 * q
+	var wValues [][]uint32
+	var fullInnerPoints []uint32
+	if r < q {
+		wValues = make([][]uint32, s)
+	} else {
+		fullInnerPoints = make([]uint32, q)
+		for w := range fullInnerPoints {
+			fullInnerPoints[w] = uint32(w)
+		}
+	}
 	var checksum uint64
 	for j := 0; j < s; j++ {
+		zval := gf2.NonzeroElementAt(j)
+		if !fullOuterField {
+			zval = zvals[j]
+		}
 		// Evaluate each ψₕ at zⱼ.
-		v0 := gf2.EvalPoly(psi[0], zvals[j])
-		v1 := gf2.EvalPoly(psi[1], zvals[j])
-		v2 := gf2.EvalPoly(psi[2], zvals[j])
-		// Project to F_q^3 for each w ∈ {0,…,q-1} and accumulate index.
-		for w := 0; w < q; w++ {
-			ww := uint32(w)
+		v0 := gf2.EvalPoly(psi[0], zval)
+		v1 := gf2.EvalPoly(psi[1], zval)
+		v2 := gf2.EvalPoly(psi[2], zval)
+		var innerPoints []uint32
+		if r == q {
+			innerPoints = fullInnerPoints
+		} else {
+			innerPoints = gf2.RandDistinctBaseElements(r)
+			wValues[j] = innerPoints
+		}
+		// Apply the inner evaluation map at r=d+1 distinct base-field points.
+		for _, ww := range innerPoints {
 			c0 := gf2.Phi(v0, ww)
 			c1 := gf2.Phi(v1, ww)
 			c2 := gf2.Phi(v2, ww)
@@ -197,27 +197,75 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, i int) (uint64, int, ConcAux) {
 		}
 	}
 
-	// The codeword restricted to the curve, g = f∘ψ, has degree d·t (f has total
-	// degree d, ψ has degree t), so all s = dt+1 evaluations are needed to
-	// determine g(0) = f(i). Precompute Lagrange weights over all s z-values: O(s²).
-	weights := gf2.LagrangeWeightsAt0(zvals)
+	for k := 0; k < noiseCount; k++ {
+		checksum ^= uint64(rand.Intn(q3))
+	}
 
-	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: zvals}
+	// Restricting a degree-d RM polynomial to a degree-t curve produces a
+	// univariate polynomial of degree at most d*t, so all s=d*t+1 values are
+	// required for general codewords.
+	if fullOuterField {
+		return checksum, ell, ConcAux{FullOuterField: true, WValues: wValues}
+	}
+	weights, err := gf2.LagrangeWeightsAt0Fast(zvals)
+	if err != nil {
+		panic(fmt.Errorf("precompute concatenated RM interpolation weights: %w", err))
+	}
+
+	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: zvals, WValues: wValues}
 }
 
-// DecodeConcRM recovers f(i) = g(0) ∈ GF(q) from s = dt+1 blocks of q server
-// responses each, where g = f∘ψ has degree d·t.
-// yBlocks[j][w] = db[φ(ψ(zⱼ), w)] for j ∈ [s], w ∈ Fq.
-// Step 1: φ⁻¹ per block — O(q) scalar-GF(q²) multiplies using precomputed (β+w)⁻¹.
+// DecodeConcRM recovers the requested RM codeword value from s=d*t+1 blocks
+// of r=d+1 server responses each (for extension degree e=2).
+// Step 1: apply the inner inverse map φ⁻¹ to each block.
 // Step 2: outer Lagrange at 0 — O(s) GF(q²) multiplies using precomputed λⱼ(0).
-func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) uint32 {
+func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) (uint32, error) {
 	n := len(aux.ZVals)
-	uvals := make([]GFExt2Elem, n)
-	for j := 0; j < n; j++ {
-		uvals[j] = gf2.PhiInv(yBlocks[j])
+	if aux.FullOuterField {
+		n = int(gf2.Base.Q)*int(gf2.Base.Q) - 1
+		if len(aux.ZVals) != 0 || len(aux.LagrangeWeights) != 0 {
+			return 0, fmt.Errorf("full-outer-field decoding does not accept explicit interpolation points or weights")
+		}
 	}
-	result := gf2.EvalLagrangeAt0(uvals, aux.LagrangeWeights)
-	return result.A
+	if n == 0 {
+		return 0, fmt.Errorf("concatenated RM auxiliary data has no interpolation points")
+	}
+	if !aux.FullOuterField && len(aux.LagrangeWeights) != n {
+		return 0, fmt.Errorf("concatenated RM auxiliary data has %d points but %d weights", n, len(aux.LagrangeWeights))
+	}
+	if len(yBlocks) != n {
+		return 0, fmt.Errorf("concatenated RM response has %d blocks but auxiliary data requires %d", len(yBlocks), n)
+	}
+	uvals := make([]GFExt2Elem, n)
+	usesFullBaseField := len(aux.WValues) == 0
+	if !usesFullBaseField && len(aux.WValues) != n {
+		return 0, fmt.Errorf("concatenated RM auxiliary data has inner points for %d blocks; want %d", len(aux.WValues), n)
+	}
+	for j := 0; j < n; j++ {
+		if usesFullBaseField {
+			if len(yBlocks[j]) != int(gf2.Base.Q) {
+				return 0, fmt.Errorf("concatenated RM response block %d has %d values; full-field inner decoding requires %d", j, len(yBlocks[j]), gf2.Base.Q)
+			}
+			uvals[j] = gf2.PhiInv(yBlocks[j])
+			continue
+		}
+		value, err := gf2.PhiInvAt(yBlocks[j], aux.WValues[j])
+		if err != nil {
+			return 0, fmt.Errorf("decode inner block %d: %w", j, err)
+		}
+		uvals[j] = value
+	}
+	var result GFExt2Elem
+	if aux.FullOuterField {
+		// For |F|=q² and deg(f)≤|F|-2, Σ_{z∈F}f(z)=0. Hence
+		// f(0)=-Σ_{z∈F*}f(z), which is the same sum in characteristic two.
+		for _, value := range uvals {
+			result = gf2.Add(result, value)
+		}
+	} else {
+		result = gf2.EvalLagrangeAt0(uvals, aux.LagrangeWeights)
+	}
+	return result.A, nil
 }
 
 // GenerateCurvePoints4D generates q-1 query positions for a 4D database of size q⁴.
@@ -251,7 +299,7 @@ func GenerateCurvePoints4D(degree, q, i int) []int {
 	return points
 }
 
-// GenerateCurvePointsWithNoise generates the PLDN query for the Lifted RS construction.
+// GenerateCurvePointsWithNoise generates the lifted-RS query for the Lifted RS construction.
 // Returns (allPoints, realPoints):
 //   - allPoints: q-1+noiseCount positions shuffled together, sent to the server.
 //   - realPoints: the q-1 genuine curve positions, used by the client for decoding.
@@ -286,11 +334,6 @@ func GenerateCurvePointsWithNoise(degree, q, i, noiseCount int) ([]int, []int) {
 
 	return all, real
 }
-
-// ─── GF(2^n) curve generation ────────────────────────────────────────────────
-//
-// Over GF(2^n), addition is XOR so Newton forward differences don't apply.
-// We use Horner evaluation instead: O(degree · q) GF multiplications total.
 
 // GenerateCurvePointsGF2n generates q−1 query positions for a 2D GF(2^n) database.
 // The curve is a pair of random degree-k polynomials (p_x, p_y) over GF(2^n) with
@@ -337,71 +380,4 @@ func GenerateCurvePointsGF2n3D(gf *GF2n, degree, i int) []int {
 		points = append(points, int(fz)*q2+int(fy)*q+int(fx))
 	}
 	return points
-}
-
-// GenerateCurvePointsGF2nWithNoise is the PLDN variant for GF(2^n): generates q−1
-// genuine curve positions plus noiseCount uniform-random positions, all shuffled.
-// Returns (allPoints, realPoints).
-func GenerateCurvePointsGF2nWithNoise(gf *GF2n, degree, i, noiseCount int) ([]int, []int) {
-	q := int(gf.Q)
-	x, y := SingleIndexToRowCol(q, i)
-	t := rand.Intn(q)
-
-	uniX := gf.RandPolyWithValue(degree, uint32(t), uint32(x))
-	uniY := gf.RandPolyWithValue(degree, uint32(t), uint32(y))
-
-	real := make([]int, 0, q-1)
-	for z := 0; z < q; z++ {
-		if z == t {
-			continue
-		}
-		fx := gf.EvalPoly(uniX, uint32(z))
-		fy := gf.EvalPoly(uniY, uint32(z))
-		real = append(real, int(fy)*q+int(fx))
-	}
-
-	qSq := q * q
-	all := make([]int, len(real)+noiseCount)
-	copy(all, real)
-	for k := len(real); k < len(all); k++ {
-		all[k] = rand.Intn(qSq)
-	}
-	rand.Shuffle(len(all), func(a, b int) { all[a], all[b] = all[b], all[a] })
-	return all, real
-}
-
-// GenerateCurvePoints3DWithNoise is the 3D variant with noise injection for PLDN.
-func GenerateCurvePoints3DWithNoise(degree, q, i, noiseCount int) ([]int, []int) {
-	x, y, z := SingleIndexToRowCol3D(q, i)
-	t := rand.Intn(q)
-	uniX := GenerateRandomPolynomialCoeffs(degree, q, t, x)
-	uniY := GenerateRandomPolynomialCoeffs(degree, q, t, y)
-	uniZ := GenerateRandomPolynomialCoeffs(degree, q, t, z)
-
-	stateX := buildDiffTable(uniX, degree, q)
-	stateY := buildDiffTable(uniY, degree, q)
-	stateZ := buildDiffTable(uniZ, degree, q)
-
-	q2 := q * q
-	real := make([]int, 0, q-1)
-	for ev := 0; ev < q; ev++ {
-		if ev != t {
-			real = append(real, stateZ[0]*q2+stateY[0]*q+stateX[0])
-		}
-		if ev < q-1 {
-			advanceDiffState(stateX, q)
-			advanceDiffState(stateY, q)
-			advanceDiffState(stateZ, q)
-		}
-	}
-
-	qCube := q2 * q
-	all := make([]int, len(real)+noiseCount)
-	copy(all, real)
-	for k := len(real); k < len(all); k++ {
-		all[k] = rand.Intn(qCube)
-	}
-	rand.Shuffle(len(all), func(a, b int) { all[a], all[b] = all[b], all[a] })
-
-	return all, real
 }
