@@ -142,9 +142,11 @@ type ConcAux struct {
 	// omitted: for degree at most q²-2, f(0) is the sum of those evaluations.
 	FullOuterField bool
 	// WValues[j] contains the r=d+1 base-field evaluation points used by
-	// the inner map for outer block j. It is nil when r=q, where the only
-	// possible set is the full base field and PhiInv uses its optimized path.
+	// the inner map for outer block j when r<q-1.
 	WValues [][]uint32
+	// MissingWValues[j] identifies the one omitted base-field point when
+	// r=q-1. This compact representation avoids retaining q-1 values per block.
+	MissingWValues []uint32
 }
 
 // NonzeroElementAt returns the index-th element in a deterministic enumeration
@@ -180,6 +182,37 @@ func (g *GF2nExt2) PhiInv(yBlock []uint32) GFExt2Elem {
 		}
 	}
 	return acc
+}
+
+// PhiInvMissing interpolates values at every base-field point except missing
+// and evaluates the resulting degree-at-most-q-2 polynomial at beta. yBlock is
+// ordered by increasing base-field point with missing omitted.
+func (g *GF2nExt2) PhiInvMissing(yBlock []uint32, missing uint32) (GFExt2Elem, error) {
+	q := int(g.Base.Q)
+	if missing >= g.Base.Q {
+		return GFExt2Elem{}, fmt.Errorf("missing inner evaluation point %d is outside GF(%d)", missing, q)
+	}
+	if len(yBlock) != q-1 {
+		return GFExt2Elem{}, fmt.Errorf("PhiInvMissing requires %d values, got %d", q-1, len(yBlock))
+	}
+
+	var acc GFExt2Elem
+	valueIndex := 0
+	for w := uint32(0); w < g.Base.Q; w++ {
+		if w == missing {
+			continue
+		}
+		y := yBlock[valueIndex]
+		valueIndex++
+		if y >= g.Base.Q {
+			return GFExt2Elem{}, fmt.Errorf("PhiInvMissing value %d is outside GF(%d): %d", valueIndex-1, q, y)
+		}
+		if y != 0 {
+			weight := g.Base.Mul(y, w^missing)
+			acc = g.Add(acc, g.ScalarMul(g.BetaInvWeights[w], weight))
+		}
+	}
+	return g.Mul(acc, g.BetaInvWeights[missing]), nil
 }
 
 // PhiInvAt applies the manuscript's inner inverse map at arbitrary distinct

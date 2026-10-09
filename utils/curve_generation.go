@@ -3,6 +3,8 @@ package utils
 import (
 	"fmt"
 	"math/rand"
+	"runtime"
+	"sync"
 )
 
 // EvaluatePolynomial evaluates a polynomial using Horner's method.
@@ -162,8 +164,14 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, d, i int) (uint64, int, ConcAux
 	q2 := q * q
 	q3 := q2 * q
 	var wValues [][]uint32
+	var missingWValues []uint32
 	var fullInnerPoints []uint32
-	if r < q {
+	if r == q-1 {
+		missingWValues = make([]uint32, s)
+		for j := range missingWValues {
+			missingWValues[j] = uint32(rand.Intn(q))
+		}
+	} else if r < q {
 		wValues = make([][]uint32, s)
 	} else {
 		fullInnerPoints = make([]uint32, q)
@@ -172,28 +180,59 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, d, i int) (uint64, int, ConcAux
 		}
 	}
 	var checksum uint64
-	for j := 0; j < s; j++ {
-		zval := gf2.NonzeroElementAt(j)
-		if !fullOuterField {
-			zval = zvals[j]
+	if r == q-1 {
+		workerCount := min(runtime.GOMAXPROCS(0), s)
+		partialChecksums := make([]uint64, workerCount)
+		var workers sync.WaitGroup
+		workers.Add(workerCount)
+		for worker := 0; worker < workerCount; worker++ {
+			go func(worker int) {
+				defer workers.Done()
+				var partial uint64
+				for j := worker; j < s; j += workerCount {
+					zval := zvals[j]
+					v0 := gf2.EvalPoly(psi[0], zval)
+					v1 := gf2.EvalPoly(psi[1], zval)
+					v2 := gf2.EvalPoly(psi[2], zval)
+					for ww := uint32(0); ww < gf.Q; ww++ {
+						if ww == missingWValues[j] {
+							continue
+						}
+						c0 := gf2.Phi(v0, ww)
+						c1 := gf2.Phi(v1, ww)
+						c2 := gf2.Phi(v2, ww)
+						partial ^= uint64(int(c2)*q2 + int(c1)*q + int(c0))
+					}
+				}
+				partialChecksums[worker] = partial
+			}(worker)
 		}
-		// Evaluate each ψₕ at zⱼ.
-		v0 := gf2.EvalPoly(psi[0], zval)
-		v1 := gf2.EvalPoly(psi[1], zval)
-		v2 := gf2.EvalPoly(psi[2], zval)
-		var innerPoints []uint32
-		if r == q {
-			innerPoints = fullInnerPoints
-		} else {
-			innerPoints = gf2.RandDistinctBaseElements(r)
-			wValues[j] = innerPoints
+		workers.Wait()
+		for _, partial := range partialChecksums {
+			checksum ^= partial
 		}
-		// Apply the inner evaluation map at r=d+1 distinct base-field points.
-		for _, ww := range innerPoints {
-			c0 := gf2.Phi(v0, ww)
-			c1 := gf2.Phi(v1, ww)
-			c2 := gf2.Phi(v2, ww)
-			checksum ^= uint64(int(c2)*q2 + int(c1)*q + int(c0))
+	} else {
+		for j := 0; j < s; j++ {
+			zval := gf2.NonzeroElementAt(j)
+			if !fullOuterField {
+				zval = zvals[j]
+			}
+			v0 := gf2.EvalPoly(psi[0], zval)
+			v1 := gf2.EvalPoly(psi[1], zval)
+			v2 := gf2.EvalPoly(psi[2], zval)
+			var innerPoints []uint32
+			if r == q {
+				innerPoints = fullInnerPoints
+			} else {
+				innerPoints = gf2.RandDistinctBaseElements(r)
+				wValues[j] = innerPoints
+			}
+			for _, ww := range innerPoints {
+				c0 := gf2.Phi(v0, ww)
+				c1 := gf2.Phi(v1, ww)
+				c2 := gf2.Phi(v2, ww)
+				checksum ^= uint64(int(c2)*q2 + int(c1)*q + int(c0))
+			}
 		}
 	}
 
@@ -205,14 +244,14 @@ func GenerateConcCurvePoints3D(gf2 *GF2nExt2, t, d, i int) (uint64, int, ConcAux
 	// univariate polynomial of degree at most d*t, so all s=d*t+1 values are
 	// required for general codewords.
 	if fullOuterField {
-		return checksum, ell, ConcAux{FullOuterField: true, WValues: wValues}
+		return checksum, ell, ConcAux{FullOuterField: true, WValues: wValues, MissingWValues: missingWValues}
 	}
 	weights, err := gf2.LagrangeWeightsAt0Fast(zvals)
 	if err != nil {
 		panic(fmt.Errorf("precompute concatenated RM interpolation weights: %w", err))
 	}
 
-	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: zvals, WValues: wValues}
+	return checksum, ell, ConcAux{LagrangeWeights: weights, ZVals: zvals, WValues: wValues, MissingWValues: missingWValues}
 }
 
 // DecodeConcRM recovers the requested RM codeword value from s=d*t+1 blocks
@@ -237,9 +276,15 @@ func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) (uint32, error
 		return 0, fmt.Errorf("concatenated RM response has %d blocks but auxiliary data requires %d", len(yBlocks), n)
 	}
 	uvals := make([]GFExt2Elem, n)
-	usesFullBaseField := len(aux.WValues) == 0
+	usesMissingBasePoint := len(aux.MissingWValues) > 0
+	usesFullBaseField := len(aux.WValues) == 0 && !usesMissingBasePoint
+	if usesMissingBasePoint && len(aux.WValues) > 0 {
+		return 0, fmt.Errorf("concatenated RM auxiliary data contains both explicit and omitted inner points")
+	}
 	if !usesFullBaseField && len(aux.WValues) != n {
-		return 0, fmt.Errorf("concatenated RM auxiliary data has inner points for %d blocks; want %d", len(aux.WValues), n)
+		if !usesMissingBasePoint || len(aux.MissingWValues) != n {
+			return 0, fmt.Errorf("concatenated RM auxiliary data has inner-point data for %d blocks; want %d", max(len(aux.WValues), len(aux.MissingWValues)), n)
+		}
 	}
 	for j := 0; j < n; j++ {
 		if usesFullBaseField {
@@ -247,6 +292,14 @@ func DecodeConcRM(gf2 *GF2nExt2, yBlocks [][]uint32, aux ConcAux) (uint32, error
 				return 0, fmt.Errorf("concatenated RM response block %d has %d values; full-field inner decoding requires %d", j, len(yBlocks[j]), gf2.Base.Q)
 			}
 			uvals[j] = gf2.PhiInv(yBlocks[j])
+			continue
+		}
+		if usesMissingBasePoint {
+			value, err := gf2.PhiInvMissing(yBlocks[j], aux.MissingWValues[j])
+			if err != nil {
+				return 0, fmt.Errorf("decode inner block %d: %w", j, err)
+			}
+			uvals[j] = value
 			continue
 		}
 		value, err := gf2.PhiInvAt(yBlocks[j], aux.WValues[j])

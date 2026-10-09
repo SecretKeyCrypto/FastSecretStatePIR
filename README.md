@@ -17,7 +17,7 @@ type PIR interface {
 }
 ```
 
-`Params.Q`, `Params.K`, and `Params.M` denote the field size `q`, curve degree `t`, and database dimension `m`. `Params.D` is the RM degree bound `d` used by RM-Conc; `NewRMConc` interprets zero as the compatibility default `d=q-1`.
+`Params.Q`, `Params.K`, and `Params.M` denote the field size `q`, curve degree `t`, and database dimension `m`. `Params.D` is the RM degree bound `d` used by RM-Conc; `NewRMConc` interprets zero as the default `d=q-2`.
 
 `NewPIR` is retained as a compatibility alias for `NewLiftedRS`. New code should call `NewLiftedRS` or `NewRMConc` explicitly.
 
@@ -32,7 +32,7 @@ The online algorithms and the offline encoders do not have the same completeness
 
 Shared implementation choices and limitations:
 
-- `NewRMConc` uses `d=q-1` when `Params.D` is zero. Smaller `d` values are supported and tested.
+- `NewRMConc` uses `d=q-2` when `Params.D` is zero. Other supported `d` values can be selected explicitly and are tested.
 - The manuscript locality `ℓ` counts genuine LDC positions only. Production `Query` and `QueryLocal` calls append 128 dummy positions, so their transmitted query length is `L=ℓ+128`.
 - The extension degree is fixed to `e=2`; higher extension degrees from the manuscript are not implemented.
 - RM-Conc currently supports only three-dimensional databases and binary extension base fields.
@@ -96,7 +96,7 @@ Most benchmarks are in `pir/pir_test.go`; the fast-versus-reference interpolatio
 | `BenchmarkEncode` | External RMEncoding plus secret permutation and masking, for a small prime-field instance | This is **RM encoding**, even though `NewPIR` selects the Lift-RS online construction. It is not a Lift-RS encoding benchmark. File I/O and the external process are included. |
 | `BenchmarkQueryGenLiftedRS2D`, `BenchmarkQueryGen3D_t5`, `BenchmarkQueryGen3D_t6`, `BenchmarkQueryGenLiftedRS3D_q13_t7` | Curve generation, secret permutation, 128 dummy positions, and shuffle | No database encoding, server evaluation, response transfer, or network. Prime-field and binary-field cases use different field implementations. |
 | Corresponding `BenchmarkDecode...` groups | Lookup of genuine positions in a shuffled query, mask removal, and client combination | Responses are random mock values. Query generation, server work, network, and correctness checking are outside the timed loop. |
-| `BenchmarkQueryGenConcRM3D` | Outer-curve sampling/evaluation, all `ℓ=sr` inner projections, 128 dummy samples, and fast outer-weight precomputation | Uses `d=q-1`, `e=2`; streams positions into a checksum instead of allocating the transmitted query. It does **not** apply the secret permutation, materialize/shuffle the query, contact a server, or encode a database. |
+| `BenchmarkQueryGenConcRM3D` | Outer-curve sampling/evaluation, all `ℓ=sr` inner projections, 128 dummy samples, and fast outer-weight precomputation | Uses `d=q-2`, `e=2`; streams positions into a checksum instead of allocating the transmitted query. It does **not** apply the secret permutation, materialize/shuffle the query, contact a server, or encode a database. |
 | `BenchmarkDecodeConcRM3D` | Direct `φ^-1` processing of all `s` blocks plus the outer weighted sum | Uses small parameters (`q=16,d=3` and `q=256,d=5`) and random mock blocks. Outer weights are prepared before timing. It excludes query lookup, dummy removal, mask removal, server/network work, and large Table 2 parameters. |
 | `BenchmarkLagrangeWeightsAt0Implementations` | Fast product-tree weight generation versus the retained `O(s^2)` reference | Isolated arithmetic microbenchmark; not a complete query or decode benchmark. |
 
@@ -143,7 +143,7 @@ Generates the query positions for RM-Conc over `GF(q²)^3`. For RM degree `d` an
 - `r = d(e-1)+1 = d+1` inner base-field points per outer point; and
 - locality `ℓ = sr`, excluding dummy queries.
 
-The production transmitted query has `L=ℓ+128` positions. Only at the default `d=q-1` do we have `r=q` and hence `ℓ=sq`. The benchmark uses precisely this default-`d` case, but streams the genuine and dummy positions into a checksum. It therefore measures their generation without the otherwise prohibitive query allocation, secret permutation, and shuffle.
+The production transmitted query has `L=ℓ+128` positions. At the default `d=q-2`, we have `r=q-1`, `s=(q-2)t+1`, and `ℓ=s(q-1)`. The benchmark uses precisely this default-`d` case, but streams the genuine and dummy positions into a checksum. It therefore measures their generation without the otherwise prohibitive query allocation, secret permutation, and shuffle.
 
 ```bash
 go test ./pir -run '^$' -bench BenchmarkQueryGenConcRM3D -benchtime=1x -timeout=300s
@@ -157,9 +157,28 @@ This benchmark is slow for large parameters (see table below) because it must st
 go test ./pir -run '^$' -bench BenchmarkDecodeConcRM3D -benchtime=100x
 ```
 
-Production decoding uses all `s=dt+1` outer blocks, not only `t+1`. It first applies the inner inverse map `φ^-1` to each block of `r=d+1` responses and then evaluates the degree-at-most-`dt` outer polynomial at zero. General-`d` inner interpolation currently costs `O(sr^2)`; when `d=q-1`, the full-base-field `PhiInv` identity reduces this step to `O(sq)`. Outer interpolation normally uses query-time precomputed weights and costs `O(s)` online. When `s=q²-1`, query generation instead enumerates every nonzero element of `GF(q²)` and omits the nodes and weights; decoding uses the characteristic-two identity `f(0)=Σ_{z∈GF(q²)*}f(z)` for `deg(f)≤q²-2`.
+Production decoding uses all `s=dt+1` outer blocks, not only `t+1`. It first applies the inner inverse map `φ^-1` to each block of `r=d+1` responses and then evaluates the degree-at-most-`dt` outer polynomial at zero. General-`d` inner interpolation costs `O(sr^2)`. The default `d=q-2` case compactly records the one omitted base-field point per block and interpolates in `O(sq)`; the full-base-field special case `d=q-1`, where `r=q`, also costs `O(sq)`. Outer interpolation normally uses query-time precomputed weights and costs `O(s)` online. When `s=q²-1`, query generation instead enumerates every nonzero element of `GF(q²)` and omits the nodes and weights; decoding uses the characteristic-two identity `f(0)=Σ_{z∈GF(q²)*}f(z)` for `deg(f)≤q²-2`.
 
-The decode benchmark is intentionally not run at the huge default-`d` Table 2 sizes. It times the arithmetic kernel on smaller variable-`d` instances with mock response blocks and excludes permutation lookup, dummy filtering, and mask removal.
+The permanent decode benchmark uses smaller variable-`d` instances so it can be run repeatedly. The full Table 2 parameter set has also been measured with the same `DecodeConcRM` arithmetic by making every outer entry reference one representative mock response block. This avoids retaining a 67-103 GB synthetic answer while still executing all `s*r` inner-decoding operations and the outer weighted sum. The measured decode excludes response construction, permutation lookup, dummy filtering, mask removal, server work, network transfer, and query-time interpolation-weight preparation.
+
+### Recorded RM-Conc Table 2 timings
+
+The following one-shot (`-benchtime=1x`) measurements were taken on this checkout on an Apple M5 Pro with 18 CPU cores and 48 GB of memory, running macOS 26.6.2 and Go 1.27.1. Each entry is `query generation + client answer decoding`; all values are seconds. The obsolete column is transcribed from the manuscript table for comparison.
+
+| `(q,m,t)` | New parameters `d=q-2` | Old parameters `d=q-1` | Obsolete manuscript value |
+|---|---:|---:|---:|
+| `(2^12,3,6)` | `1.285 + 0.181` | `2.069 + 0.116` | `0.188 + 0.1171` |
+| `(2^13,3,6)` | `3.853 + 0.728` | `6.435 + 0.476` | `0.721 + 0.4769` |
+| `(2^14,3,6)` | `11.803 + 3.205` | `14.276 + 2.279` | `2.750 + 2.231` |
+| `(2^16,3,6)` | `118.684 + 77.755` | `158.333 + 47.255` | `45.200 + 46.850` |
+| `(2^12,3,4)` | `0.621 + 0.124` | `1.039 + 0.078` | `0.125 + 0.0779` |
+| `(2^13,3,4)` | `1.860 + 0.500` | `3.287 + 0.316` | `0.489 + 0.3176` |
+| `(2^14,3,4)` | `6.045 + 2.163` | `11.107 + 1.493` | `1.867 + 1.482` |
+| `(2^16,3,4)` | `60.666 + 51.394` | `129.111 + 31.475` | `30.600 + 31.050` |
+
+The old-parameter decode measurements closely reproduce the obsolete decode values, which validates the mock arithmetic benchmark. The new `d=q-2` decoder is about 1.56-1.60 times slower because `PhiInvMissing` performs more field operations per response than the full-field `PhiInv` shortcut.
+
+The query columns are not a controlled measurement of the parameter change alone: the current `d=q-2` checksum path parallelizes outer blocks across `GOMAXPROCS`, while the `d=q-1` path is sequential. Both query columns are valid measurements of their current implementations, but their difference combines parameters and implementation strategy. The much larger current query times relative to the manuscript remain unexplained; the manuscript likely used a narrower or different query-generation timing boundary.
 
 ## Parameter Configuration
 
@@ -171,7 +190,7 @@ Parameters are defined in `pir/pir_test.go`. To evaluate different field sizes o
 | `q = 2^n` | Field size |
 | `t` | Outer curve degree |
 | `m` | Database dimension (2 = matrix, 3 = cube) |
-| `d` | RM polynomial degree bound (`q-1` by default) |
+| `d` | RM polynomial degree bound (`q-2` by default) |
 | `e` | Extension degree (fixed to 2 in this implementation) |
 | `s = dt + 1` | Number of outer curve evaluation points |
 | `r = d(e-1)+1 = d+1` | Inner evaluation points per outer point |
@@ -182,12 +201,12 @@ Parameters are defined in `pir/pir_test.go`. To evaluate different field sizes o
 
 | n | q | t | d | s | r | ℓ |
 |---|---:|---:|---:|---:|---:|---:|
-| 13 | 8192 | 7 | 8191 | 57338 | 8192 | 469,712,896 |
-| 14 | 16384 | 6 | 16383 | 98299 | 16384 | 1,610,530,816 |
-| 16 | 65536 | 5 | 65535 | 327676 | 65536 | 21,474,574,336 |
-| 16 | 65536 | 6 | 65535 | 393211 | 65536 | 25,769,476,096 |
+| 13 | 8192 | 7 | 8190 | 57331 | 8191 | 469,598,221 |
+| 14 | 16384 | 6 | 16382 | 98293 | 16383 | 1,610,334,219 |
+| 16 | 65536 | 5 | 65534 | 327671 | 65535 | 21,473,918,985 |
+| 16 | 65536 | 6 | 65534 | 393205 | 65535 | 25,768,689,675 |
 
-These are default-`d` sizes, not stored timing claims. Re-run the benchmarks on the target machine for current measurements. Query generation is dominated by producing `ℓ=sr` positions. Default-`d` decoding uses `O(sq)` full-field `φ⁻¹` work followed by an `O(s)` weighted outer sum.
+These are default-`d` sizes, not stored timing claims. Re-run the benchmarks on the target machine for current measurements. Query generation is dominated by producing `ℓ=sr` positions. Default `d=q-2` decoding uses the compact omitted-point `O(sq)` path; explicit `d=q-1` uses the full-field `O(sq)` shortcut.
 
 Additional parameter selections are defined in `paramsConcRM3D` in `pir/pir_test.go`.
 

@@ -2,6 +2,39 @@ package utils
 
 import "testing"
 
+func TestPhiInvMissing(t *testing.T) {
+	gf := NewGF2n(4)
+	gf2 := NewGF2nExt2(gf)
+	coefficients := []uint32{3, 5, 7, 9, 11, 13, 2, 4, 6, 8, 10, 12, 14, 15, 1}
+	extensionCoefficients := make([]GFExt2Elem, len(coefficients))
+	for i, coefficient := range coefficients {
+		extensionCoefficients[i] = GFExt2Elem{A: coefficient}
+	}
+	want := gf2.EvalPoly(extensionCoefficients, GFExt2Elem{B: 1})
+
+	for missing := uint32(0); missing < gf.Q; missing++ {
+		values := make([]uint32, 0, gf.Q-1)
+		for w := uint32(0); w < gf.Q; w++ {
+			if w == missing {
+				continue
+			}
+			value := coefficients[len(coefficients)-1]
+			for i := len(coefficients) - 2; i >= 0; i-- {
+				value = gf.Mul(value, w) ^ coefficients[i]
+			}
+			values = append(values, value)
+		}
+
+		got, err := gf2.PhiInvMissing(values, missing)
+		if err != nil {
+			t.Fatalf("missing %d: PhiInvMissing returned error: %v", missing, err)
+		}
+		if got != want {
+			t.Fatalf("missing %d: PhiInvMissing = %+v, want %+v", missing, got, want)
+		}
+	}
+}
+
 func TestGenerateConcCurvePoints3DAddsDefaultNoise(t *testing.T) {
 	gf := NewGF2n(13)
 	gf2 := NewGF2nExt2(gf)
@@ -30,6 +63,25 @@ func TestGenerateConcCurvePoints3DAddsDefaultNoise(t *testing.T) {
 	for i := range wantWeights {
 		if aux.LagrangeWeights[i] != wantWeights[i] {
 			t.Fatalf("GenerateConcCurvePoints3D weight %d = %+v, want %+v", i, aux.LagrangeWeights[i], wantWeights[i])
+		}
+	}
+}
+
+func TestGenerateConcCurvePoints3DCompactsQMinusOneInnerPoints(t *testing.T) {
+	gf2 := NewGF2nExt2(NewGF2n(4))
+	_, gotEll, aux := GenerateConcCurvePoints3D(gf2, 1, 14, 7)
+	if gotEll != 15*15 {
+		t.Fatalf("GenerateConcCurvePoints3D returned ell=%d, want %d", gotEll, 15*15)
+	}
+	if len(aux.WValues) != 0 {
+		t.Fatalf("GenerateConcCurvePoints3D retained %d explicit inner-point blocks", len(aux.WValues))
+	}
+	if len(aux.MissingWValues) != 15 {
+		t.Fatalf("GenerateConcCurvePoints3D returned %d omitted inner points, want 15", len(aux.MissingWValues))
+	}
+	for block, missing := range aux.MissingWValues {
+		if missing >= gf2.Base.Q {
+			t.Fatalf("omitted inner point %d for block %d is outside GF(%d)", missing, block, gf2.Base.Q)
 		}
 	}
 }

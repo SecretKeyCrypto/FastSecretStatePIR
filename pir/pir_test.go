@@ -1337,8 +1337,8 @@ func TestConcRMDecode(t *testing.T) {
 
 // ─── Concatenated RM m=3 benchmarks (Table 2 last column) ───────────────────
 //
-// Parameters follow Fig. 4 with d = q-1, e = 2:
-//   r = q,  s = (q-1)·t + 1,  ℓ = s·q  (genuine query positions)
+// Parameters follow Fig. 4 with d = q-2, e = 2:
+//   r = q-1,  s = (q-2)·t + 1,  ℓ = s·(q-1)  (genuine query positions)
 //
 // Query-gen timing includes:
 //   1. Sampling m degree-t polynomials over GF(q²)          O(m·t)
@@ -1357,15 +1357,11 @@ var paramsConcRM3D = []struct {
 	n, t  int
 	label string
 }{
-	// Smallest Table 2 entry — benchmarkable in reasonable time (~seconds).
-	{13, 7, "GF(2^13) q=8192  m=3 t=7  s=57338  ℓ=470M"},
-	// Larger entries — query gen is dominated by the O(s·q) projected output.
-	{14, 6, "GF(2^14) q=16384 m=3 t=6  s=98299  ℓ=1.6B"},
-	{16, 5, "GF(2^16) q=65536 m=3 t=5  s=327676 ℓ=21.5B"},
-	{16, 6, "GF(2^16) q=65536 m=3 t=6  s=393211 ℓ=25.8B"},
 	// Table 2 new parameter selections.
 	{12, 6, "GF(2^12) q=4096  m=3 t=6  new"},
 	{13, 6, "GF(2^13) q=8192  m=3 t=6  new"},
+	{14, 6, "GF(2^14) q=16384 m=3 t=6  new"},
+	{16, 6, "GF(2^16) q=65536 m=3 t=6  new"},
 	{12, 4, "GF(2^12) q=4096  m=3 t=4  new"},
 	{13, 4, "GF(2^13) q=8192  m=3 t=4  new"},
 	{14, 4, "GF(2^14) q=16384 m=3 t=4  new"},
@@ -1390,12 +1386,12 @@ func BenchmarkQueryGenConcRM3D(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				target := rng.Intn(dbSize)
 				start := time.Now()
-				_, _, _ = utils.GenerateConcCurvePoints3D(gf2, p.t, q-1, target)
+				_, _, _ = utils.GenerateConcCurvePoints3D(gf2, p.t, q-2, target)
 				total += time.Since(start)
 			}
 			b.StopTimer()
-			s := (q-1)*p.t + 1
-			ell := s * q
+			s := (q-2)*p.t + 1
+			ell := s * (q - 1)
 			fmt.Printf("  %-65s query gen: %v  (s=%d ℓ=%d L=%d noise=128)\n", p.label, total/time.Duration(b.N), s, ell, ell+128)
 		})
 	}
@@ -1404,8 +1400,8 @@ func BenchmarkQueryGenConcRM3D(b *testing.B) {
 // BenchmarkDecodeConcRM3D measures the full Conc. RM decode:
 // φ⁻¹ (O(q·s) scalar-GF(q²) ops) + outer Lagrange at 0 (O(s) GF(q²) ops).
 func BenchmarkDecodeConcRM3D(b *testing.B) {
-	// Use smaller, explicit degrees here: materializing responses for the
-	// d=q-1 table parameters would require hundreds of millions of values.
+	// Keep the permanent repeated benchmark small. Full Table 2 arithmetic can
+	// be measured with aliased mock blocks without materializing every response.
 	params := []struct {
 		n, t, d int
 		label   string

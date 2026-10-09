@@ -230,10 +230,10 @@ func TestLiftedRSEndToEndWithGF2nCodeword(t *testing.T) {
 	}
 }
 
-func TestRMConcDefaultsDegreeToQMinusOne(t *testing.T) {
+func TestRMConcDefaultsDegreeToQMinusTwo(t *testing.T) {
 	scheme := NewRMConc(Params{Q: 16, K: 2, M: 3})
-	if scheme.params.D != 15 {
-		t.Fatalf("default RM degree = %d, want 15", scheme.params.D)
+	if scheme.params.D != 14 {
+		t.Fatalf("default RM degree = %d, want 14", scheme.params.D)
 	}
 }
 

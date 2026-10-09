@@ -16,7 +16,7 @@ type Params struct {
 	// M is the database/RM-code dimension.
 	M uint8
 	// D is the RM polynomial-degree bound d used by RMConc. A zero value passed
-	// to NewRMConc selects the compatibility default q-1.
+	// to NewRMConc selects the default q-2.
 	D uint64
 }
 

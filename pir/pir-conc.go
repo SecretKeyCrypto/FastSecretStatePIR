@@ -3,6 +3,7 @@ package pir
 import (
 	"fmt"
 	"math/bits"
+	"math/rand"
 
 	"rme/utils"
 )
@@ -23,7 +24,7 @@ type ConcClientQuery struct {
 // NewRMConc creates an RM concatenated-curve PIR instance.
 func NewRMConc(params Params) *RMConc {
 	if params.D == 0 && params.Q > 0 {
-		params.D = params.Q - 1
+		params.D = params.Q - 2
 	}
 	return &RMConc{
 		pirCore: &pirCore{params: params},
@@ -176,8 +177,11 @@ func (p *RMConc) GenerateConcCurveClientQuery(i int, noiseCount int) ConcClientQ
 
 	points := make([]int, 0, s*r)
 	var wValues [][]uint32
+	var missingWValues []uint32
 	var fullInnerPoints []uint32
-	if r < q {
+	if r == q-1 {
+		missingWValues = make([]uint32, s)
+	} else if r < q {
 		wValues = make([][]uint32, s)
 	} else {
 		fullInnerPoints = make([]uint32, q)
@@ -194,6 +198,20 @@ func (p *RMConc) GenerateConcCurveClientQuery(i int, noiseCount int) ConcClientQ
 		v0 := gf2.EvalPoly(psi[0], zValue)
 		v1 := gf2.EvalPoly(psi[1], zValue)
 		v2 := gf2.EvalPoly(psi[2], zValue)
+		if r == q-1 {
+			missing := uint32(rand.Intn(q))
+			missingWValues[j] = missing
+			for ww := uint32(0); ww < gf2.Base.Q; ww++ {
+				if ww == missing {
+					continue
+				}
+				c0 := gf2.Phi(v0, ww)
+				c1 := gf2.Phi(v1, ww)
+				c2 := gf2.Phi(v2, ww)
+				points = append(points, int(c2)*q2+int(c1)*q+int(c0))
+			}
+			continue
+		}
 		var innerPoints []uint32
 		if r == q {
 			innerPoints = fullInnerPoints
@@ -213,7 +231,7 @@ func (p *RMConc) GenerateConcCurveClientQuery(i int, noiseCount int) ConcClientQ
 	if fullOuterField {
 		return ConcClientQuery{
 			ClientQuery: ClientQuery{Query: query, RealPositions: realPositions},
-			Auxiliary:   utils.ConcAux{FullOuterField: true, WValues: wValues},
+			Auxiliary:   utils.ConcAux{FullOuterField: true, WValues: wValues, MissingWValues: missingWValues},
 		}
 	}
 	weights, err := gf2.LagrangeWeightsAt0Fast(zValues)
@@ -224,6 +242,7 @@ func (p *RMConc) GenerateConcCurveClientQuery(i int, noiseCount int) ConcClientQ
 		LagrangeWeights: weights,
 		ZVals:           zValues,
 		WValues:         wValues,
+		MissingWValues:  missingWValues,
 	}
 	return ConcClientQuery{
 		ClientQuery: ClientQuery{Query: query, RealPositions: realPositions},

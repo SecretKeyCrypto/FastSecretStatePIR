@@ -14,5 +14,8 @@ input/test_db.csv
 # Claude session files
 .claude/
 
+# Local agent handoff notes
+HANDOFF.md
+
 # Go test cache
 *.test
